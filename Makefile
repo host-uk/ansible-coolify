@@ -1,4 +1,4 @@
-.PHONY: help install-deps setup-native deploy-dev deploy-prod lint test build-ansible clean \
+.PHONY: help install-deps update-deps setup-native deploy-dev deploy-prod lint test build-ansible clean \
 	docker-deploy-dev docker-deploy-prod docker-test docker-lint
 
 # Variables
@@ -13,7 +13,8 @@ DOCKER_RUN_ARGS = -it --rm \
 help:
 	@echo "Available targets (Native):"
 	@echo "  setup-native       - Install native dependencies (brew/pip) and collections"
-	@echo "  install-deps       - Install Ansible collections only"
+	@echo "  install-deps       - Install missing Ansible collections"
+	@echo "  update-deps        - Force update all Ansible collections"
 	@echo "  deploy-dev         - Run deployment for dev (native)"
 	@echo "  deploy-prod        - Run deployment for prod (native)"
 	@echo "  test               - Run Parallels VM lifecycle test (native)"
@@ -42,6 +43,9 @@ setup-native:
 	$(MAKE) install-deps
 
 install-deps:
+	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections
+
+update-deps:
 	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
 
 deploy-dev:

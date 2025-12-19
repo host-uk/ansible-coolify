@@ -1,0 +1,21 @@
+---
+
+extends: default
+
+rules:
+  document-start: disable  # FIXME: for now?
+  indentation:
+    level: error
+    # indent-sequences: false
+    indent-sequences: consistent
+  line-length:
+    max: 148  # 79 would be accessible and readability-friendly
+  truthy:
+    allowed-values:
+    - 'false'
+    - 'no'
+    - 'true'
+    - 'yes'
+    - 'on'  # Allow "on" key name in GHA CI/CD workflow definitions
+
+...

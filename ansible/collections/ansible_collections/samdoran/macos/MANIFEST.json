@@ -1,0 +1,36 @@
+{
+ "collection_info": {
+  "namespace": "samdoran",
+  "name": "macos",
+  "version": "2.6.3",
+  "authors": [
+   "Sam Doran <sdoran@redhat.com>"
+  ],
+  "readme": "README.md",
+  "tags": [
+   "development",
+   "system",
+   "macos",
+   "xcode",
+   "python"
+  ],
+  "description": "Roles and custom content for manangig macOS",
+  "license": [
+   "GPL-2.0-or-later"
+  ],
+  "license_file": null,
+  "dependencies": {},
+  "repository": "https://github.com/samdoran/ansible-collection-macos",
+  "documentation": "https://github.com/samdoran/ansible-collection-macos?tab=readme-ov-file#readme",
+  "homepage": "https://github.com/samdoran/ansible-collection-macos",
+  "issues": "https://github.com/samdoran/ansible-collection-macos/issues"
+ },
+ "file_manifest_file": {
+  "name": "FILES.json",
+  "ftype": "file",
+  "chksum_type": "sha256",
+  "chksum_sha256": "b8f6a343a7ea88b68055b53f5ef825f15d3d431ee7e231cc594cbcb4ddb10fa6",
+  "format": 1
+ },
+ "format": 1
+}
