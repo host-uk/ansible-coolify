@@ -42,7 +42,7 @@ setup-native:
 	$(MAKE) install-deps
 
 install-deps:
-	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections
+	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
 
 deploy-dev:
 	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_install_coolify.yml
