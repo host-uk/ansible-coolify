@@ -1,6 +1,0 @@
----
-- name: Create Coolify Application
-  hosts: controller
-  become: true
-  roles:
-    - role: coolify-application

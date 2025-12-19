@@ -22,4 +22,4 @@ ansible-playbook -i inventory/inventory.yml -l development -e "{
   'coolify_application_project_uuid': '$PROJECT_UUID',
   'coolify_application_server_uuid': '$SERVER_UUID',
   'coolify_application_docker_compose_raw': \"$COMPOSE_RAW\"
-}" playbooks/playbook_create_application.yml
+}" playbooks/coolify_application_create.yml

@@ -1,10 +1,9 @@
-.PHONY: help install-deps update-deps setup-native start-agent login-dev login-prod deploy-dev deploy-prod lint test build-ansible clean \
-	docker-deploy-dev docker-deploy-prod docker-test docker-lint \
-	backup-dev backup-prod restore-dev restore-prod \
-	sync-apps \
-	create-app-dev create-app-prod restore-app-dev restore-app-prod uninstall-app-dev uninstall-app-prod \
-	create-service-dev create-service-prod restore-service-dev restore-service-prod uninstall-service-dev uninstall-service-prod \
-	create-db-dev create-db-prod restore-db-dev restore-db-prod uninstall-db-dev uninstall-db-prod
+.PHONY: help install-deps update-deps setup-native start-agent dev-login prod-login dev-deploy prod-deploy dev-uninstall prod-uninstall dev-reinstall prod-reinstall dev-backup prod-backup dev-restore prod-restore lint test build-ansible clean \
+	dev-docker-deploy prod-docker-deploy docker-test docker-lint \
+	sync-apps dev-test-install-config \
+	dev-create-app prod-create-app dev-restore-app prod-restore-app dev-uninstall-app prod-uninstall-app \
+	dev-create-service prod-create-service dev-restore-service prod-restore-service dev-uninstall-service prod-uninstall-service \
+	dev-create-db prod-create-db dev-restore-db prod-restore-db dev-uninstall-db prod-uninstall-db
 
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
@@ -19,58 +18,58 @@ help:
 	@echo "Available targets (Native):"
 	@echo "  setup-native       - Install native dependencies (brew/pip) and collections"
 	@echo "  start-agent        - Ensure ssh-agent is running"
-	@echo "  login-dev          - Add development SSH key to ssh-agent"
-	@echo "  login-prod         - Add production SSH key to ssh-agent"
+	@echo "  dev-login          - Add development SSH key to ssh-agent"
+	@echo "  prod-login         - Add production SSH key to ssh-agent"
 	@echo "  install-deps       - Install missing Ansible collections"
 	@echo "  update-deps        - Force update all Ansible collections"
-	@echo "  deploy-dev         - Run deployment for dev (native)"
-	@echo "  deploy-prod        - Run deployment for prod (native)"
-	@echo "  backup-dev         - Backup Coolify for dev (native)"
-	@echo "  backup-prod        - Backup Coolify for prod (native)"
-	@echo "  restore-dev        - Restore Coolify for dev (native)"
-	@echo "  restore-prod       - Restore Coolify for prod (native)"
-	@echo "  uninstall-dev      - Uninstall Coolify from dev (native)"
-	@echo "  uninstall-prod     - Uninstall Coolify from prod (native)"
-	@echo "  reinstall-dev      - Full reinstall for dev (Backup -> Uninstall -> Install -> Restore)"
-	@echo "  reinstall-prod     - Full reinstall for prod (Backup -> Uninstall -> Install -> Restore)"
+	@echo "  dev-deploy         - Run deployment for dev (native)"
+	@echo "  prod-deploy        - Run deployment for prod (native)"
+	@echo "  dev-backup         - Backup Coolify for dev (native)"
+	@echo "  prod-backup        - Backup Coolify for prod (native)"
+	@echo "  dev-restore        - Restore Coolify for dev (native)"
+	@echo "  prod-restore       - Restore Coolify for prod (native)"
+	@echo "  dev-uninstall      - Uninstall Coolify from dev (native)"
+	@echo "  prod-uninstall     - Uninstall Coolify from prod (native)"
+	@echo "  dev-reinstall      - Full reinstall for dev (Backup -> Uninstall -> Install -> Restore)"
+	@echo "  prod-reinstall     - Full reinstall for prod (Backup -> Uninstall -> Install -> Restore)"
 	@echo "  test               - Run Parallels VM lifecycle test (native)"
 	@echo "  lint               - Run ansible-lint (native)"
 	@echo ""
 	@echo "  sync-apps          - Sync applications from development to production"
 	@echo ""
 	@echo "Resource Management (dev/prod):"
-	@echo "  create-{app,service,db}-{dev,prod}"
-	@echo "  restore-{app,service,db}-{dev,prod}"
-	@echo "  uninstall-{app,service,db}-{dev,prod}"
+	@echo "  {dev,prod}-create-{app,service,db}"
+	@echo "  {dev,prod}-restore-{app,service,db}"
+	@echo "  {dev,prod}-uninstall-{app,service,db}"
 	@echo ""
 	@echo "Available targets (Docker):"
 	@echo "  build-ansible      - Build the Ansible Docker image"
-	@echo "  docker-deploy-dev  - Run deployment for dev (docker)"
-	@echo "  docker-deploy-prod - Run deployment for prod (docker)"
+	@echo "  dev-docker-deploy  - Run deployment for dev (docker)"
+	@echo "  prod-docker-deploy - Run deployment for prod (docker)"
 	@echo "  docker-test        - Run Parallels VM lifecycle test (docker)"
 	@echo "  docker-lint        - Run ansible-lint (docker)"
 	@echo ""
 	@echo "Configuration Tests:"
-	@echo "  test-coolify-install-config - Test Coolify installation with custom config"
+	@echo "  dev-test-install-config - Test Coolify installation with custom config"
 	@echo ""
 	@echo "General:"
 	@echo "  clean              - Clean up temporary files"
 	@echo ""
 	@echo "Examples:"
 	@echo "  # Deploy to development with custom admin credentials"
-	@echo "  make deploy-dev EXTRA_VARS=\"-e coolify_root_username=admin -e coolify_root_user_email=admin@example.com -e coolify_root_user_password=SecurePassword123!\""
+	@echo "  make dev-deploy EXTRA_VARS=\"-e coolify_root_username=admin -e coolify_root_user_email=admin@example.com -e coolify_root_user_password=SecurePassword123!\""
 	@echo ""
 	@echo "  # Run only the parallels_vm setup"
-	@echo "  make deploy-dev EXTRA_VARS=\"--tags parallels_vm\""
+	@echo "  make dev-deploy EXTRA_VARS=\"--tags parallels_vm\""
 	@echo ""
 	@echo "  # Uninstall Coolify"
-	@echo "  make uninstall-dev"
+	@echo "  make dev-uninstall"
 	@echo ""
 	@echo "  # Full reinstall (uninstall then deploy)"
-	@echo "  make uninstall-dev && make deploy-dev"
+	@echo "  make dev-uninstall && make dev-deploy"
 	@echo ""
 	@echo "  # Automated reinstall with Backup & Restore"
-	@echo "  make reinstall-dev"
+	@echo "  make dev-reinstall"
 
 # --- Native Targets ---
 
@@ -84,14 +83,14 @@ setup-native:
 	pip install ansible-core distlib netaddr jsonschema ipaddr jmespath
 	$(MAKE) install-deps
 
-login-dev:
+dev-login:
 	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
 		eval $$(ssh-agent -s) && ssh-add ~/.ssh/vm-worker; \
 	else \
 		ssh-add ~/.ssh/vm-worker; \
 	fi
 
-login-prod:
+prod-login:
 	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
 		eval $$(ssh-agent -s) && ssh-add ~/.ssh/hostuk; \
 	else \
@@ -113,79 +112,79 @@ install-deps:
 update-deps:
 	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
 
-deploy-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_install_coolify.yml $(EXTRA_VARS)
+dev-deploy:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_create.yml $(EXTRA_VARS)
 
-deploy-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_install_coolify.yml $(EXTRA_VARS)
+prod-deploy:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_create.yml $(EXTRA_VARS)
 
-uninstall-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify.yml $(EXTRA_VARS)
+dev-uninstall:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_uninstall.yml $(EXTRA_VARS)
 
-uninstall-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify.yml $(EXTRA_VARS)
+prod-uninstall:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_uninstall.yml $(EXTRA_VARS)
 
-reinstall-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_reinstall_coolify.yml $(EXTRA_VARS)
+dev-reinstall:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_reinstall.yml $(EXTRA_VARS)
 
-reinstall-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_reinstall_coolify.yml $(EXTRA_VARS)
+prod-reinstall:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_reinstall.yml $(EXTRA_VARS)
 
-backup-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_backup_coolify.yml $(EXTRA_VARS)
+dev-backup:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_backup.yml $(EXTRA_VARS)
 
-backup-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_backup_coolify.yml $(EXTRA_VARS)
+prod-backup:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_backup.yml $(EXTRA_VARS)
 
-restore-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify.yml $(EXTRA_VARS)
+dev-restore:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_restore.yml $(EXTRA_VARS)
 
-restore-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify.yml $(EXTRA_VARS)
+prod-restore:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_restore.yml $(EXTRA_VARS)
 
 sync-apps:
-	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/sync_applications.yml $(EXTRA_VARS)
+	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/coolify_application_sync.yml $(EXTRA_VARS)
 
 # --- Resource Management ---
 
-create-app-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_create_coolify_application.yml $(EXTRA_VARS)
-create-app-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_create_coolify_application.yml $(EXTRA_VARS)
-restore-app-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify_application.yml $(EXTRA_VARS)
-restore-app-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify_application.yml $(EXTRA_VARS)
-uninstall-app-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify_application.yml $(EXTRA_VARS)
-uninstall-app-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify_application.yml $(EXTRA_VARS)
+dev-create-app:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_application_create.yml $(EXTRA_VARS)
+prod-create-app:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_application_create.yml $(EXTRA_VARS)
+dev-restore-app:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_application_restore.yml $(EXTRA_VARS)
+prod-restore-app:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_application_restore.yml $(EXTRA_VARS)
+dev-uninstall-app:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_application_uninstall.yml $(EXTRA_VARS)
+prod-uninstall-app:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_application_uninstall.yml $(EXTRA_VARS)
 
-create-service-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_create_coolify_service.yml $(EXTRA_VARS)
-create-service-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_create_coolify_service.yml $(EXTRA_VARS)
-restore-service-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify_service.yml $(EXTRA_VARS)
-restore-service-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify_service.yml $(EXTRA_VARS)
-uninstall-service-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify_service.yml $(EXTRA_VARS)
-uninstall-service-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify_service.yml $(EXTRA_VARS)
+dev-create-service:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_service_create.yml $(EXTRA_VARS)
+prod-create-service:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_service_create.yml $(EXTRA_VARS)
+dev-restore-service:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_service_restore.yml $(EXTRA_VARS)
+prod-restore-service:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_service_restore.yml $(EXTRA_VARS)
+dev-uninstall-service:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_service_uninstall.yml $(EXTRA_VARS)
+prod-uninstall-service:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_service_uninstall.yml $(EXTRA_VARS)
 
-create-db-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_create_coolify_database.yml $(EXTRA_VARS)
-create-db-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_create_coolify_database.yml $(EXTRA_VARS)
-restore-db-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify_database.yml $(EXTRA_VARS)
-restore-db-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify_database.yml $(EXTRA_VARS)
-uninstall-db-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify_database.yml $(EXTRA_VARS)
-uninstall-db-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify_database.yml $(EXTRA_VARS)
+dev-create-db:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_database_create.yml $(EXTRA_VARS)
+prod-create-db:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_database_create.yml $(EXTRA_VARS)
+dev-restore-db:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_database_restore.yml $(EXTRA_VARS)
+prod-restore-db:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_database_restore.yml $(EXTRA_VARS)
+dev-uninstall-db:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_database_uninstall.yml $(EXTRA_VARS)
+prod-uninstall-db:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify_database_uninstall.yml $(EXTRA_VARS)
 
 lint:
 	ansible-lint ansible/
@@ -195,8 +194,8 @@ test:
 
 # --- Configuration Tests ---
 
-test-coolify-install-config:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_install_coolify.yml \
+dev-test-install-config:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify_create.yml \
 		-e "coolify_root_username=test" \
 		-e "coolify_root_user_email=test@host.uk.com" \
 		-e "coolify_root_user_password=Tesn735dfsd!" \
@@ -210,11 +209,11 @@ build-ansible:
 	./ansible/scripts/docker_tag.sh
 	cd ansible && docker build -t $(ANSIBLE_IMAGE) .
 
-docker-deploy-dev:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l development playbooks/playbook_install_coolify.yml
+dev-docker-deploy:
+	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l development playbooks/coolify_create.yml
 
-docker-deploy-prod:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l production playbooks/playbook_install_coolify.yml
+prod-docker-deploy:
+	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l production playbooks/coolify_create.yml
 
 docker-test:
 	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook tests/test_parallels_vm.yml
