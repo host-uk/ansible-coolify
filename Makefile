@@ -1,6 +1,7 @@
 .PHONY: help install-deps update-deps setup-native start-agent login-dev login-prod deploy-dev deploy-prod lint test build-ansible clean \
 	docker-deploy-dev docker-deploy-prod docker-test docker-lint \
-	backup-dev backup-prod restore-dev restore-prod
+	backup-dev backup-prod restore-dev restore-prod \
+	sync-apps
 
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
@@ -31,6 +32,8 @@ help:
 	@echo "  reinstall-prod     - Full reinstall for prod (Backup -> Uninstall -> Install -> Restore)"
 	@echo "  test               - Run Parallels VM lifecycle test (native)"
 	@echo "  lint               - Run ansible-lint (native)"
+	@echo ""
+	@echo "  sync-apps          - Sync applications from development to production"
 	@echo ""
 	@echo "Available targets (Docker):"
 	@echo "  build-ansible      - Build the Ansible Docker image"
@@ -131,6 +134,9 @@ restore-dev:
 
 restore-prod:
 	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify.yml $(EXTRA_VARS)
+
+sync-apps:
+	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/sync_applications.yml $(EXTRA_VARS)
 
 lint:
 	ansible-lint ansible/

@@ -1,0 +1,53 @@
+---
+- name: Fetch Applications from Development
+  hosts: controller
+  become: true
+  tasks:
+    - name: Get API Token from Development
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+      when: inventory_hostname == 'vm-controller'
+
+    - name: Fetch Applications
+      ansible.builtin.uri:
+        url: "http://localhost:8000/api/v1/applications"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: dev_apps
+      when: inventory_hostname == 'vm-controller'
+
+    - name: Save Applications to local fact
+      ansible.builtin.set_fact:
+        global_dev_apps: "{{ dev_apps.json }}"
+      delegate_to: localhost
+      delegate_facts: true
+      when: inventory_hostname == 'vm-controller'
+
+- name: Sync to Production
+  hosts: controller
+  become: true
+  tasks:
+    - name: Skip if not production controller
+      ansible.builtin.meta: end_host
+      when: inventory_hostname != 'noc.host.uk.com'
+
+    - name: Get API Token from Production
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+
+    - name: Process and Create Applications on Production
+      ansible.builtin.include_role:
+        name: coolify-application
+      vars:
+        coolify_api_token: "{{ coolify_api_token }}"
+        coolify_application_type: "{{ 'dockercompose' if item.build_pack == 'dockercompose' else 'private-deploy-key' }}"
+        coolify_application_project_uuid: "FIXME_PROJECT_UUID"
+        coolify_application_server_uuid: "FIXME_SERVER_UUID"
+        coolify_application_environment_name: "{{ item.environment.name }}"
+        coolify_application_name: "{{ item.name }}"
+        coolify_application_docker_compose_raw: "{{ item.docker_compose_raw | default('') }}"
+        coolify_application_git_repository: "{{ item.git_repository | default('') }}"
+        coolify_application_git_branch: "{{ item.git_branch | default('') }}"
+      loop: "{{ hostvars['localhost']['global_dev_apps'] }}"
+      when: hostvars['localhost']['global_dev_apps'] is defined
+      loop_control:
+        label: "{{ item.name }}"

@@ -1,0 +1,10 @@
+---
+coolify_api_base_url: "http://localhost:8000/api/v1"
+coolify_application_project_uuid: ""
+coolify_application_server_uuid: ""
+coolify_application_environment_name: "main"
+coolify_application_environment_uuid: ""
+coolify_application_instant_deploy: true
+coolify_application_use_build_server: true
+coolify_application_connect_to_docker_network: true
+coolify_application_force_domain_override: false
