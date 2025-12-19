@@ -12,7 +12,7 @@
     vm_exists: "{{ parallels_facts_initial.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | list | length > 0 }}"
 
 - name: Create VM if it doesn't exist
-  ansible.builtin.command: "prlctl create {{ parallels_vm_name }} --distribution ubuntu"
+  ansible.builtin.command: "prlctl create {{ parallels_vm_name }} --distribution ubuntu --ostype linux"
   when: not vm_exists
   changed_when: true
 
@@ -40,6 +40,10 @@
 - name: Extract VM IP address
   ansible.builtin.set_fact:
     current_vm_ip: "{{ parallels_facts_updated.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | map(attribute='ip_configured') | first }}"
+
+- name: Debug VM IP address
+  ansible.builtin.debug:
+    msg: "VM {{ parallels_vm_name }} has IP {{ current_vm_ip }}"
 
 - name: Update inventory ansible_host for the VM
   ansible.builtin.set_fact:

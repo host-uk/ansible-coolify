@@ -4,3 +4,5 @@ parallels_vm_base_image: "ubuntu/24.04" # This is a placeholder, prlctl create u
 parallels_vm_cpu: 2
 parallels_vm_memory: 2048
 parallels_vm_user: root
+parallels_vm_ssh_private_key_file: ~/.ssh/vm-worker
+

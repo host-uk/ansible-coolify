@@ -14,7 +14,9 @@
     user: root
     state: present
     key: "{{ public_key }}"
-  when: ansible_os_family == 'Debian'
+  when: 
+    - ansible_os_family == 'Debian'
+    - public_key | length > 0
 
 - name: Install required packages
   ansible.builtin.package:

@@ -9,9 +9,10 @@ all:
         build.de.host.uk.com:
     development:
       hosts:
-        lab.snider.dev:
-        localhost:
         vm-worker:
+          ansible_host: vm-worker
+          ansible_ssh_private_key_file: ~/.ssh/vm-worker
+          ansible_become: true
 
     # Role-based groups
     app_servers:
@@ -30,13 +31,16 @@ all:
       hosts:
         noc.host.uk.com:
         lab.snider.dev:
-          ansible_host: dev.host.uk.com
+          ansible_host: 10.69.69.87
         localhost:
           ansible_connection: local
+          ansible_become: false
     worker:
       hosts:
         de.host.uk.com:
         de2.host.uk.com:
         build.de.host.uk.com:
         vm-worker:
-          ansible_host: 192.168.1.100 # Replace with your VM IP
+          ansible_host: vm-worker
+          ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
+
