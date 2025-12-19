@@ -2,6 +2,7 @@
 - name: Update package lists
   ansible.builtin.apt:
     update_cache: true
+    cache_valid_time: 3600
   when: ansible_os_family == 'Debian'
 
 - name: Upgrade all packages
@@ -49,41 +50,23 @@
     dest: /etc/fail2ban/jail.local
     mode: preserve
   when: ansible_os_family == 'Debian'
+  notify: Restart fail2ban
 
-- name: Restart fail2ban
-  ansible.builtin.service:
-    name: fail2ban
-    state: restarted
-  when: ansible_os_family == 'Debian'
-
-- name: Ensure no conflicting PermitRootLogin in sshd_config
+- name: SSH Hardening
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
-    regexp: '^PermitRootLogin'
-    state: absent
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+    - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 2' }
+    - { regexp: '^#?AllowTcpForwarding', line: 'AllowTcpForwarding no' }
+    - { regexp: '^#?AllowAgentForwarding', line: 'AllowAgentForwarding no' }
+    - { regexp: '^#?AuthorizedKeysFile', line: 'AuthorizedKeysFile .ssh/authorized_keys' }
   when: 
     - ansible_os_family == 'Debian'
     - ansible_connection != 'local'
-
-- name: SSH Hardening for root user
-  ansible.builtin.blockinfile:
-    path: /etc/ssh/sshd_config
-    block: |
-      PermitRootLogin prohibit-password
-      PasswordAuthentication no
-      X11Forwarding no
-      MaxAuthTries 2
-      AllowTcpForwarding no
-      AllowAgentForwarding no
-      AuthorizedKeysFile .ssh/authorized_keys
-  when: 
-    - ansible_os_family == 'Debian'
-    - ansible_connection != 'local'
-
-- name: Restart sshd
-  ansible.builtin.service:
-    name: sshd
-    state: restarted
-  when: 
-    - ansible_os_family == 'Debian'
-    - ansible_connection != 'local'
+  notify: Restart sshd

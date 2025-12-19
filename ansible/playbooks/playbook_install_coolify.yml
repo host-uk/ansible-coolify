@@ -31,7 +31,7 @@
 
     - name: Check if Coolify is already installed
       ansible.builtin.stat:
-        path: /usr/local/bin/coolify
+        path: /data/coolify/source/.env
       register: coolify_bin
 
     - name: Download Coolify installation script
