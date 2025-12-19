@@ -7,6 +7,44 @@
   delegate_to: localhost
   become: false
 
+- name: Setup API for backup trigger
+  ansible.builtin.include_tasks: api_setup.yml
+  when: inventory_hostname == 'vm-controller'
+
+- name: Trigger manual schedule run on vm-controller
+  ansible.builtin.command: docker exec coolify php artisan schedule:run-manual
+  register: schedule_run
+  changed_when: true
+  when: inventory_hostname == 'vm-controller'
+
+- name: Wait for backup completion
+  ansible.builtin.pause:
+    seconds: 2
+  when: inventory_hostname == 'vm-controller'
+
+- name: Get latest backup info from API
+  ansible.builtin.uri:
+    url: "http://localhost:8000/api/v1/instance/backups"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: [200, 404]
+  register: api_backup_info
+  until: api_backup_info.status == 200 and (api_backup_info.json | length > 0)
+  retries: 5
+  delay: 5
+  when: 
+    - inventory_hostname == 'vm-controller'
+    - coolify_api_token is defined
+  ignore_errors: true
+
+- name: Debug API Backup Info
+  ansible.builtin.debug:
+    var: api_backup_info.json
+  when: 
+    - inventory_hostname == 'vm-controller'
+    - api_backup_info.json is defined
+
 - name: Get APP_KEY from .env
   ansible.builtin.shell: grep '^APP_KEY=' /data/coolify/source/.env | cut -d'=' -f2-
   register: app_key_raw

@@ -1,5 +1,6 @@
 .PHONY: help install-deps update-deps setup-native start-agent login-dev login-prod deploy-dev deploy-prod lint test build-ansible clean \
-	docker-deploy-dev docker-deploy-prod docker-test docker-lint
+	docker-deploy-dev docker-deploy-prod docker-test docker-lint \
+	backup-dev backup-prod restore-dev restore-prod
 
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
@@ -20,6 +21,10 @@ help:
 	@echo "  update-deps        - Force update all Ansible collections"
 	@echo "  deploy-dev         - Run deployment for dev (native)"
 	@echo "  deploy-prod        - Run deployment for prod (native)"
+	@echo "  backup-dev         - Backup Coolify for dev (native)"
+	@echo "  backup-prod        - Backup Coolify for prod (native)"
+	@echo "  restore-dev        - Restore Coolify for dev (native)"
+	@echo "  restore-prod       - Restore Coolify for prod (native)"
 	@echo "  uninstall-dev      - Uninstall Coolify from dev (native)"
 	@echo "  uninstall-prod     - Uninstall Coolify from prod (native)"
 	@echo "  reinstall-dev      - Full reinstall for dev (Backup -> Uninstall -> Install -> Restore)"
@@ -114,6 +119,18 @@ reinstall-dev:
 
 reinstall-prod:
 	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_reinstall_coolify.yml $(EXTRA_VARS)
+
+backup-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_backup_coolify.yml $(EXTRA_VARS)
+
+backup-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_backup_coolify.yml $(EXTRA_VARS)
+
+restore-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify.yml $(EXTRA_VARS)
+
+restore-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify.yml $(EXTRA_VARS)
 
 lint:
 	ansible-lint ansible/
