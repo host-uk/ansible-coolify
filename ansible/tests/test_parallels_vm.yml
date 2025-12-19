@@ -1,0 +1,14 @@
+---
+- name: Test Parallels VM lifecycle management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Run parallels_vm role
+      ansible.builtin.include_role:
+        name: parallels_vm
+      vars:
+        # Override any variables if needed for testing
+        parallels_vm_name: "test-vm-worker"
+  tags:
+    - test

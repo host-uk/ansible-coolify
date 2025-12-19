@@ -1,6 +1,7 @@
 #!/bin/bash
 
-eval $(yq e '.docker | to_entries | .[] | "export \(.key)=\(.value)"' docker-config.yml)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+eval $(yq e '.docker | to_entries | .[] | "export \(.key)=\(.value)"' "$SCRIPT_DIR/docker-config.yml")
 
 DOCKER_IMAGE="$DOCKER_HUB_USERNAME/$DOCKER_REPO_NAME"
 
@@ -34,7 +35,12 @@ else
 fi
 
 create_env_file() {
-    cat << EOF > .env
+    cat << EOF > "$SCRIPT_DIR/../.env"
+DOCKER_REPO_NAME=$DOCKER_REPO_NAME
+NEW_TAG=$NEW_TAG
+PUSH_TO_DOCKER=$PUSH_TO_DOCKER
+EOF
+    cat << EOF > "$SCRIPT_DIR/../../.env"
 DOCKER_REPO_NAME=$DOCKER_REPO_NAME
 NEW_TAG=$NEW_TAG
 PUSH_TO_DOCKER=$PUSH_TO_DOCKER
