@@ -17,6 +17,8 @@ help:
 	@echo "  update-deps        - Force update all Ansible collections"
 	@echo "  deploy-dev         - Run deployment for dev (native)"
 	@echo "  deploy-prod        - Run deployment for prod (native)"
+	@echo "  uninstall-dev      - Uninstall Coolify from dev (native)"
+	@echo "  uninstall-prod     - Uninstall Coolify from prod (native)"
 	@echo "  test               - Run Parallels VM lifecycle test (native)"
 	@echo "  lint               - Run ansible-lint (native)"
 	@echo ""
@@ -27,8 +29,24 @@ help:
 	@echo "  docker-test        - Run Parallels VM lifecycle test (docker)"
 	@echo "  docker-lint        - Run ansible-lint (docker)"
 	@echo ""
+	@echo "Configuration Tests:"
+	@echo "  test-coolify-install-config - Test Coolify installation with custom config"
+	@echo ""
 	@echo "General:"
 	@echo "  clean              - Clean up temporary files"
+	@echo ""
+	@echo "Examples:"
+	@echo "  # Deploy to development with custom admin credentials"
+	@echo "  make deploy-dev EXTRA_VARS=\"-e coolify_root_username=admin -e coolify_root_user_email=admin@example.com -e coolify_root_user_password=SecurePassword123!\""
+	@echo ""
+	@echo "  # Run only the parallels_vm setup"
+	@echo "  make deploy-dev EXTRA_VARS=\"--tags parallels_vm\""
+	@echo ""
+	@echo "  # Uninstall Coolify"
+	@echo "  make uninstall-dev"
+	@echo ""
+	@echo "  # Full reinstall (uninstall then deploy)"
+	@echo "  make uninstall-dev && make deploy-dev"
 
 # --- Native Targets ---
 
@@ -49,16 +67,33 @@ update-deps:
 	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
 
 deploy-dev:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_install_coolify.yml
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_install_coolify.yml $(EXTRA_VARS)
 
 deploy-prod:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_install_coolify.yml
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_install_coolify.yml $(EXTRA_VARS)
+
+uninstall-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify.yml $(EXTRA_VARS)
+
+uninstall-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify.yml $(EXTRA_VARS)
 
 lint:
 	ansible-lint ansible/
 
 test:
-	cd ansible && ansible-playbook -i inventory/inventory.yml tests/test_parallels_vm.yml
+	cd ansible && ansible-playbook -i inventory/inventory.yml tests/test_parallels_vm.yml $(EXTRA_VARS)
+
+# --- Configuration Tests ---
+
+test-coolify-install-config:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_install_coolify.yml \
+		-e "coolify_root_username=test" \
+		-e "coolify_root_user_email=test@host.uk.com" \
+		-e "coolify_root_user_password=Tesn735dfsd!" \
+		-e "coolify_autoupdate=false" \
+		$(EXTRA_VARS)
+
 
 # --- Docker Targets ---
 

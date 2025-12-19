@@ -40,3 +40,4 @@ terraform.rc
 logs
 .ssh/
 dev/
+ansible/backups/

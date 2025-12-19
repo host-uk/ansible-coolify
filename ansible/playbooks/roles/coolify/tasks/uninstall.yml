@@ -1,0 +1,48 @@
+---
+- name: Stop and remove Coolify containers
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: absent
+    stop_timeout: 0
+  loop:
+    - coolify
+    - coolify-realtime
+    - coolify-db
+    - coolify-redis
+    - coolify-proxy
+    - coolify-sentinel
+  ignore_errors: true
+
+- name: Remove Coolify Docker volumes
+  community.docker.docker_volume:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - coolify-db
+    - coolify-redis
+  ignore_errors: true
+
+- name: Remove Coolify Docker network
+  community.docker.docker_network:
+    name: coolify
+    state: absent
+  ignore_errors: true
+
+- name: Delete Coolify data directory
+  ansible.builtin.file:
+    path: /data/coolify
+    state: absent
+
+- name: Remove Coolify Docker images
+  community.docker.docker_image:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - ghcr.io/coollabsio/coolify:latest
+    - ghcr.io/coollabsio/coolify-helper:latest
+    - quay.io/soketi/soketi:1.6-16-alpine
+    - postgres:15-alpine
+    - redis:alpine
+    - traefik:v3.1
+    - lucaslorentz/caddy-docker-proxy:2.8-alpine
+  ignore_errors: true

@@ -1,0 +1,78 @@
+---
+- name: Allow incoming UI Port
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+  loop:
+    - 6001
+    - 6002
+    - 8000
+  when: ansible_os_family == 'Debian'
+
+- name: Check if Coolify is already installed
+  ansible.builtin.stat:
+    path: /data/coolify/source/.env
+  register: coolify_bin
+
+- name: Download Coolify installation script
+  ansible.builtin.get_url:
+    url: "https://cdn.coollabs.io/coolify/install.sh"
+    dest: "/root/install.sh"
+    mode: "0770"
+  when: 
+    - not coolify_bin.stat.exists
+    - ansible_os_family == 'Debian'
+
+- name: Execute Coolify installation script
+  ansible.builtin.command: "/root/install.sh"
+  environment:
+    ROOT_USERNAME: "{{ coolify_root_username }}"
+    ROOT_USER_EMAIL: "{{ coolify_root_user_email }}"
+    ROOT_USER_PASSWORD: "{{ coolify_root_user_password }}"
+    DOCKER_ADDRESS_POOL_BASE: "{{ coolify_docker_address_pool_base }}"
+    DOCKER_ADDRESS_POOL_SIZE: "{{ coolify_docker_address_pool_size | string }}"
+    DOCKER_POOL_FORCE_OVERRIDE: "{{ coolify_docker_pool_force_override | string | lower }}"
+    AUTOUPDATE: "{{ coolify_autoupdate | string | lower }}"
+    REGISTRY_URL: "{{ coolify_registry_url }}"
+  register: install_result
+  changed_when: "'Installation completed' in install_result.stdout"
+  when: 
+    - not coolify_bin.stat.exists
+    - ansible_os_family == 'Debian'
+
+- name: Debug installation script output
+  ansible.builtin.debug:
+    var: install_result.stdout_lines
+  when: 
+    - not coolify_bin.stat.exists
+    - ansible_os_family == 'Debian'
+    - install_result is defined
+
+- name: Restart Coolify containers
+  ansible.builtin.command: "docker compose restart"
+  args:
+    chdir: /data/coolify/source
+  when: 
+    - install_result is defined
+    - install_result is changed
+    - ansible_os_family == 'Debian'
+
+- name: Ensure Coolify .env exists for backup
+  ansible.builtin.stat:
+    path: /data/coolify/source/.env
+  register: coolify_env_file
+
+- name: Backup Coolify .env file to local machine
+  ansible.builtin.fetch:
+    src: /data/coolify/source/.env
+    dest: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/.env"
+    flat: true
+  when: 
+    - ansible_os_family == 'Debian'
+    - coolify_env_file.stat.exists
+
+- name: Register Worker in Coolify
+  ansible.builtin.include_tasks: register_worker.yml
+  when: 
+    - coolify_register_worker | bool
+    - ansible_os_family == 'Debian'

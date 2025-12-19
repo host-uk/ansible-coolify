@@ -1,0 +1,24 @@
+---
+# Predefined root username for first admin account
+coolify_root_username: ""
+# Predefined root user email for first admin account
+coolify_root_user_email: ""
+# Predefined root user password for first admin account
+coolify_root_user_password: ""
+
+# Custom Docker address pool base (CIDR notation)
+coolify_docker_address_pool_base: "10.0.0.0/8"
+# Custom Docker address pool size (must be 16-28)
+coolify_docker_address_pool_size: 24
+# Force override existing Docker pool configuration
+coolify_docker_pool_force_override: false
+# Enable/disable automatic Coolify updates
+coolify_autoupdate: true
+# Custom Docker registry URL for Coolify images
+coolify_registry_url: "ghcr.io"
+
+# Worker registration settings
+coolify_register_worker: true
+coolify_worker_name: "vm-worker"
+coolify_worker_ip: "{{ hostvars[coolify_worker_name]['ansible_host'] | default(coolify_worker_name) }}"
+coolify_private_key_path: "~/.ssh/vm-worker"

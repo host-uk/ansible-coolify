@@ -1,4 +1,16 @@
 ---
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  when: ansible_os_family == 'Debian'
+
+- name: Ensure hostname resolves to 127.0.0.1
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.0\.1'
+    line: "127.0.0.1 localhost {{ inventory_hostname }}"
+  when: ansible_os_family == 'Debian'
+
 - name: Update package lists
   ansible.builtin.apt:
     update_cache: true
