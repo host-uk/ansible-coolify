@@ -1,0 +1,6 @@
+---
+parallels_vm_name: "vm-worker"
+parallels_vm_base_image: "ubuntu/24.04" # This is a placeholder, prlctl create usually needs a real image or template
+parallels_vm_cpu: 2
+parallels_vm_memory: 2048
+parallels_vm_user: root

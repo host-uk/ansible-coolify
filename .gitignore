@@ -1,6 +1,6 @@
 # Ignore application files
 node_modules
-
+.idea
 # Local .terraform directories
 **/.terraform/*
 

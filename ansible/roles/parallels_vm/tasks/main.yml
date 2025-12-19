@@ -1,0 +1,55 @@
+---
+- name: Ensure Parallels Desktop is running
+  samdoran.macos.parallels_desktop:
+    state: started
+
+- name: Gather Parallels facts
+  samdoran.macos.parallels_facts:
+  register: parallels_facts_initial
+
+- name: Check if VM exists
+  ansible.builtin.set_fact:
+    vm_exists: "{{ parallels_facts_initial.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | list | length > 0 }}"
+
+- name: Create VM if it doesn't exist
+  ansible.builtin.command: "prlctl create {{ parallels_vm_name }} --distribution ubuntu"
+  when: not vm_exists
+  changed_when: true
+
+- name: Get VM status
+  ansible.builtin.set_fact:
+    vm_status: "{{ (parallels_facts_initial.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | first).status if vm_exists else 'stopped' }}"
+
+- name: Start VM if stopped
+  ansible.builtin.command: "prlctl start {{ parallels_vm_name }}"
+  when: not vm_exists or vm_status == 'stopped'
+  changed_when: true
+
+- name: Wait for VM to get an IP address
+  samdoran.macos.parallels_facts:
+  register: parallels_facts_updated
+  until: >
+    parallels_facts_updated.ansible_facts.parallels.VMs 
+    | selectattr('name', 'equalto', parallels_vm_name) 
+    | map(attribute='ip_configured') 
+    | select('ne', '-') 
+    | list | length > 0
+  retries: 60
+  delay: 5
+
+- name: Extract VM IP address
+  ansible.builtin.set_fact:
+    current_vm_ip: "{{ parallels_facts_updated.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | map(attribute='ip_configured') | first }}"
+
+- name: Update inventory ansible_host for the VM
+  ansible.builtin.set_fact:
+    ansible_host: "{{ current_vm_ip }}"
+  delegate_to: "{{ parallels_vm_name }}"
+  delegate_facts: true
+
+- name: Wait for SSH to be reachable
+  ansible.builtin.wait_for:
+    host: "{{ current_vm_ip }}"
+    port: 22
+    delay: 5
+    timeout: 300
