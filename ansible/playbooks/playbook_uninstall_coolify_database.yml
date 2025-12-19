@@ -1,0 +1,13 @@
+---
+- name: Uninstall Coolify Database
+  hosts: controller
+  become: true
+  tasks:
+    - name: Setup API Token
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+
+    - name: Delete Database
+      ansible.builtin.include_role:
+        name: coolify-database
+      vars:
+        coolify_database_state: delete

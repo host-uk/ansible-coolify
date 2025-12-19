@@ -1,0 +1,13 @@
+---
+- name: Create Coolify Database
+  hosts: controller
+  become: true
+  tasks:
+    - name: Setup API Token
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+
+    - name: Create Database
+      ansible.builtin.include_role:
+        name: coolify-database
+      vars:
+        coolify_database_state: create

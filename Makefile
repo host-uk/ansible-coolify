@@ -1,7 +1,10 @@
 .PHONY: help install-deps update-deps setup-native start-agent login-dev login-prod deploy-dev deploy-prod lint test build-ansible clean \
 	docker-deploy-dev docker-deploy-prod docker-test docker-lint \
 	backup-dev backup-prod restore-dev restore-prod \
-	sync-apps
+	sync-apps \
+	create-app-dev create-app-prod restore-app-dev restore-app-prod uninstall-app-dev uninstall-app-prod \
+	create-service-dev create-service-prod restore-service-dev restore-service-prod uninstall-service-dev uninstall-service-prod \
+	create-db-dev create-db-prod restore-db-dev restore-db-prod uninstall-db-dev uninstall-db-prod
 
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
@@ -34,6 +37,11 @@ help:
 	@echo "  lint               - Run ansible-lint (native)"
 	@echo ""
 	@echo "  sync-apps          - Sync applications from development to production"
+	@echo ""
+	@echo "Resource Management (dev/prod):"
+	@echo "  create-{app,service,db}-{dev,prod}"
+	@echo "  restore-{app,service,db}-{dev,prod}"
+	@echo "  uninstall-{app,service,db}-{dev,prod}"
 	@echo ""
 	@echo "Available targets (Docker):"
 	@echo "  build-ansible      - Build the Ansible Docker image"
@@ -137,6 +145,47 @@ restore-prod:
 
 sync-apps:
 	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/sync_applications.yml $(EXTRA_VARS)
+
+# --- Resource Management ---
+
+create-app-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_create_coolify_application.yml $(EXTRA_VARS)
+create-app-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_create_coolify_application.yml $(EXTRA_VARS)
+restore-app-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify_application.yml $(EXTRA_VARS)
+restore-app-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify_application.yml $(EXTRA_VARS)
+uninstall-app-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify_application.yml $(EXTRA_VARS)
+uninstall-app-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify_application.yml $(EXTRA_VARS)
+
+create-service-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_create_coolify_service.yml $(EXTRA_VARS)
+create-service-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_create_coolify_service.yml $(EXTRA_VARS)
+restore-service-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify_service.yml $(EXTRA_VARS)
+restore-service-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify_service.yml $(EXTRA_VARS)
+uninstall-service-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify_service.yml $(EXTRA_VARS)
+uninstall-service-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify_service.yml $(EXTRA_VARS)
+
+create-db-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_create_coolify_database.yml $(EXTRA_VARS)
+create-db-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_create_coolify_database.yml $(EXTRA_VARS)
+restore-db-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_restore_coolify_database.yml $(EXTRA_VARS)
+restore-db-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_restore_coolify_database.yml $(EXTRA_VARS)
+uninstall-db-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_uninstall_coolify_database.yml $(EXTRA_VARS)
+uninstall-db-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify_database.yml $(EXTRA_VARS)
 
 lint:
 	ansible-lint ansible/

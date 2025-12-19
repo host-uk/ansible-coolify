@@ -22,28 +22,52 @@
     seconds: 2
   when: inventory_hostname == 'vm-controller'
 
-- name: Get latest backup info from API
-  ansible.builtin.uri:
-    url: "http://localhost:8000/api/v1/instance/backups"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ coolify_api_token }}"
-    status_code: [200, 404]
-  register: api_backup_info
-  until: api_backup_info.status == 200 and (api_backup_info.json | length > 0)
-  retries: 5
+- name: Get latest backup info via Tinker
+  ansible.builtin.shell: |
+    docker exec coolify php artisan tinker --execute='
+    $execution = \Illuminate\Support\Facades\DB::table("scheduled_database_backup_executions")
+        ->latest()
+        ->first();
+    if ($execution) {
+        echo json_encode($execution);
+    } else {
+        echo "null";
+    }
+    '
+  register: tinker_backup_info
+  until: 
+    - tinker_backup_info.stdout != "null"
+    - (tinker_backup_info.stdout | from_json).status == 'success'
+  retries: 10
   delay: 5
   when: 
     - inventory_hostname == 'vm-controller'
-    - coolify_api_token is defined
   ignore_errors: true
 
-- name: Debug API Backup Info
+- name: Debug Backup Info
   ansible.builtin.debug:
-    var: api_backup_info.json
+    var: tinker_backup_info.stdout
   when: 
     - inventory_hostname == 'vm-controller'
-    - api_backup_info.json is defined
+    - tinker_backup_info.stdout is defined
+
+- name: Find latest Coolify instance backup file
+  ansible.builtin.find:
+    paths: /data/coolify/backups/instance
+    patterns: "*.tar.gz"
+    recurse: no
+  register: coolify_instance_backups
+  when: inventory_hostname == 'vm-controller'
+
+- name: Fetch Coolify instance backup
+  ansible.builtin.fetch:
+    src: "{{ (coolify_instance_backups.files | sort(attribute='mtime', reverse=true) | first).path }}"
+    dest: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/"
+    flat: true
+  when: 
+    - inventory_hostname == 'vm-controller'
+    - coolify_instance_backups.matched > 0
+  ignore_errors: true
 
 - name: Get APP_KEY from .env
   ansible.builtin.shell: grep '^APP_KEY=' /data/coolify/source/.env | cut -d'=' -f2-

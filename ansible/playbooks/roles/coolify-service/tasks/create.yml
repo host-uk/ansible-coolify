@@ -1,0 +1,26 @@
+---
+- name: Create Service
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/services"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      type: "{{ coolify_service_type }}"
+      project_uuid: "{{ coolify_service_project_uuid }}"
+      server_uuid: "{{ coolify_service_server_uuid }}"
+      environment_name: "{{ coolify_service_environment_name | default(omit) }}"
+      environment_uuid: "{{ coolify_service_environment_uuid | default(omit) }}"
+      destination_uuid: "{{ coolify_service_destination_uuid | default(omit) }}"
+      name: "{{ coolify_service_name | default(omit) }}"
+      description: "{{ coolify_service_description | default(omit) }}"
+      instant_deploy: "{{ coolify_service_instant_deploy }}"
+      docker_compose_raw: "{{ coolify_service_docker_compose_raw | default(omit) }}"
+    status_code: [200, 201]
+  register: create_service_result
+
+- name: Set Service UUID fact
+  ansible.builtin.set_fact:
+    coolify_service_uuid: "{{ create_service_result.json.uuid }}"

@@ -1,0 +1,13 @@
+---
+- name: Uninstall Coolify Application
+  hosts: controller
+  become: true
+  tasks:
+    - name: Setup API Token
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+
+    - name: Delete Application
+      ansible.builtin.include_role:
+        name: coolify-application
+      vars:
+        coolify_application_state: delete
