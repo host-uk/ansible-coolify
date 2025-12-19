@@ -1,0 +1,46 @@
+---
+- name: Setup Coolify API and Token
+  ansible.builtin.shell: |
+    docker exec coolify php artisan tinker --execute='
+    $s = \App\Models\InstanceSettings::get()->first();
+    if ($s) {
+        $s->is_api_enabled = true;
+        $s->save();
+    }
+    $user = \App\Models\User::first();
+    if ($user) {
+        $team = $user->teams()->first();
+        if ($team) {
+            $tokenName = "ansible-token";
+            $user->tokens()->where("name", $tokenName)->delete();
+            $plainToken = \Illuminate\Support\Str::random(40);
+            $token = new \Laravel\Sanctum\PersonalAccessToken();
+            $token->name = $tokenName;
+            $token->token = hash("sha256", $plainToken);
+            $token->abilities = ["*"];
+            $token->tokenable_id = $user->id;
+            $token->tokenable_type = get_class($user);
+            $token->team_id = $team->id;
+            $token->save();
+            echo $plainToken;
+        }
+    }
+    '
+  register: api_token_result
+  changed_when: true
+  no_log: true
+
+- name: Set API Token fact
+  ansible.builtin.set_fact:
+    coolify_api_token: "{{ api_token_result.stdout | trim if api_token_result is not skipped and api_token_result.stdout is defined else 'dummy_token' }}"
+  no_log: true
+
+- name: Enable Coolify API via Endpoint
+  ansible.builtin.uri:
+    url: "http://localhost:8000/api/v1/enable"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: [200, 401]
+  register: api_enable_result
+  when: not ansible_check_mode

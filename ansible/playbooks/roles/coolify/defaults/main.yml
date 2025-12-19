@@ -7,7 +7,7 @@ coolify_root_user_email: ""
 coolify_root_user_password: ""
 
 # Custom Docker address pool base (CIDR notation)
-coolify_docker_address_pool_base: "10.0.0.0/8"
+coolify_docker_address_pool_base: "172.16.0.0/12"
 # Custom Docker address pool size (must be 16-28)
 coolify_docker_address_pool_size: 24
 # Force override existing Docker pool configuration
@@ -19,6 +19,8 @@ coolify_registry_url: "ghcr.io"
 
 # Worker registration settings
 coolify_register_worker: true
-coolify_worker_name: "vm-worker"
-coolify_worker_ip: "{{ hostvars[coolify_worker_name]['ansible_host'] | default(coolify_worker_name) }}"
-coolify_private_key_path: "~/.ssh/vm-worker"
+# coolify_worker_name and coolify_private_key_path should be defined in inventory
+coolify_worker_name: "{{ groups['worker'] | first | default('') }}"
+# Prefer private_ip if defined, otherwise fall back to ansible_host
+coolify_worker_ip: "{{ hostvars[coolify_worker_name]['private_ip'] | default(hostvars[coolify_worker_name]['ansible_host'], true) | default(coolify_worker_name, true) if coolify_worker_name else '' }}"
+coolify_private_key_path: ""

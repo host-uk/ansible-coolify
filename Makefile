@@ -1,4 +1,4 @@
-.PHONY: help install-deps update-deps setup-native deploy-dev deploy-prod lint test build-ansible clean \
+.PHONY: help install-deps update-deps setup-native start-agent login-dev login-prod deploy-dev deploy-prod lint test build-ansible clean \
 	docker-deploy-dev docker-deploy-prod docker-test docker-lint
 
 # Variables
@@ -13,12 +13,17 @@ DOCKER_RUN_ARGS = -it --rm \
 help:
 	@echo "Available targets (Native):"
 	@echo "  setup-native       - Install native dependencies (brew/pip) and collections"
+	@echo "  start-agent        - Ensure ssh-agent is running"
+	@echo "  login-dev          - Add development SSH key to ssh-agent"
+	@echo "  login-prod         - Add production SSH key to ssh-agent"
 	@echo "  install-deps       - Install missing Ansible collections"
 	@echo "  update-deps        - Force update all Ansible collections"
 	@echo "  deploy-dev         - Run deployment for dev (native)"
 	@echo "  deploy-prod        - Run deployment for prod (native)"
 	@echo "  uninstall-dev      - Uninstall Coolify from dev (native)"
 	@echo "  uninstall-prod     - Uninstall Coolify from prod (native)"
+	@echo "  reinstall-dev      - Full reinstall for dev (Backup -> Uninstall -> Install -> Restore)"
+	@echo "  reinstall-prod     - Full reinstall for prod (Backup -> Uninstall -> Install -> Restore)"
 	@echo "  test               - Run Parallels VM lifecycle test (native)"
 	@echo "  lint               - Run ansible-lint (native)"
 	@echo ""
@@ -47,6 +52,9 @@ help:
 	@echo ""
 	@echo "  # Full reinstall (uninstall then deploy)"
 	@echo "  make uninstall-dev && make deploy-dev"
+	@echo ""
+	@echo "  # Automated reinstall with Backup & Restore"
+	@echo "  make reinstall-dev"
 
 # --- Native Targets ---
 
@@ -59,6 +67,29 @@ setup-native:
 	pip install --upgrade pip
 	pip install ansible-core distlib netaddr jsonschema ipaddr jmespath
 	$(MAKE) install-deps
+
+login-dev:
+	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
+		eval $$(ssh-agent -s) && ssh-add ~/.ssh/vm-worker; \
+	else \
+		ssh-add ~/.ssh/vm-worker; \
+	fi
+
+login-prod:
+	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
+		eval $$(ssh-agent -s) && ssh-add ~/.ssh/hostuk; \
+	else \
+		ssh-add ~/.ssh/hostuk; \
+	fi
+
+start-agent:
+	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
+		echo "Starting ssh-agent..."; \
+		ssh-agent -s > ~/.ssh/ssh-agent.env; \
+		echo "Agent started. Run 'source ~/.ssh/ssh-agent.env' to use it in your current shell."; \
+	else \
+		echo "ssh-agent is already running."; \
+	fi
 
 install-deps:
 	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections
@@ -77,6 +108,12 @@ uninstall-dev:
 
 uninstall-prod:
 	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_uninstall_coolify.yml $(EXTRA_VARS)
+
+reinstall-dev:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/playbook_reinstall_coolify.yml $(EXTRA_VARS)
+
+reinstall-prod:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/playbook_reinstall_coolify.yml $(EXTRA_VARS)
 
 lint:
 	ansible-lint ansible/

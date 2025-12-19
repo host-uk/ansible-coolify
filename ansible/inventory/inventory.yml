@@ -4,14 +4,48 @@ all:
     production:
       hosts:
         noc.host.uk.com:
+          ansible_host: "95.216.184.251"
+          public_ip: "95.216.184.251"
+          private_ip: "10.0.0.3"
         de.host.uk.com:
+          ansible_host: "116.202.82.115"
+          public_ip: "116.202.82.115"
+          private_ip: "10.0.1.2"
         de2.host.uk.com:
+          ansible_host: "88.99.195.41"
+          public_ip: "88.99.195.41"
+          private_ip: "10.0.1.3"
         build.de.host.uk.com:
+          ansible_host: "95.216.184.251"
+          public_ip: "95.216.184.251"
+          private_ip: "10.0.0.2"
+      vars:
+        # Production private network details
+        private_network_cidr: "10.0.0.0/16"
+        private_network_interface: "eth1"
+        ansible_ssh_private_key_file: "~/.ssh/hostuk"
+        coolify_private_key_path: "~/.ssh/hostuk" # Default for production
+        public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/hostuk.pub', errors='ignore') }}"
+        coolify_key_name: "prod-worker-key"
+        coolify_workers:
+          - de.host.uk.com
+          - de2.host.uk.com
+          - build.de.host.uk.com
     development:
       hosts:
         vm-worker:
+          ansible_host: vm-worker
+          ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
         vm-controller:
-
+          ansible_host: vm-controller
+          ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
+      vars:
+        coolify_worker_name: "vm-worker"
+        coolify_private_key_path: "~/.ssh/vm-worker"
+        public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/vm-worker.pub', errors='ignore') }}"
+        coolify_key_name: "dev-worker-key"
+        coolify_workers:
+          - vm-worker
     # Role-based groups
     app_servers:
       hosts:
@@ -29,8 +63,6 @@ all:
       hosts:
         noc.host.uk.com:
         vm-controller:
-          ansible_host: vm-controller
-          ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
         localhost:
           ansible_connection: local
           ansible_become: false
@@ -40,6 +72,4 @@ all:
         de2.host.uk.com:
         build.de.host.uk.com:
         vm-worker:
-          ansible_host: vm-worker
-          ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
 

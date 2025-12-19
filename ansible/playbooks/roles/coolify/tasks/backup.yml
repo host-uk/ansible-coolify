@@ -1,0 +1,53 @@
+---
+- name: Ensure backup directory exists on local machine
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Get APP_KEY from .env
+  ansible.builtin.shell: grep '^APP_KEY=' /data/coolify/source/.env | cut -d'=' -f2-
+  register: app_key_raw
+  changed_when: false
+
+- name: Save APP_KEY for later
+  ansible.builtin.copy:
+    content: "{{ app_key_raw.stdout }}"
+    dest: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/APP_KEY"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+
+- name: Create database dump
+  ansible.builtin.shell: |
+    docker exec coolify-db pg_dump -U coolify -d coolify -Fc > /tmp/coolify_db.dump
+  register: db_dump
+  changed_when: true
+
+- name: Fetch database dump
+  ansible.builtin.fetch:
+    src: /tmp/coolify_db.dump
+    dest: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/coolify_db.dump"
+    flat: true
+
+- name: Archive SSH keys
+  ansible.builtin.shell: |
+    cd /data/coolify/ssh/keys && tar -czf /tmp/coolify_ssh_keys.tar.gz .
+  register: ssh_keys_archive
+  changed_when: true
+
+- name: Fetch SSH keys archive
+  ansible.builtin.fetch:
+    src: /tmp/coolify_ssh_keys.tar.gz
+    dest: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/coolify_ssh_keys.tar.gz"
+    flat: true
+
+- name: Remove temporary files on remote
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/coolify_db.dump
+    - /tmp/coolify_ssh_keys.tar.gz

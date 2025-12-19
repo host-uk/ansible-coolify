@@ -1,0 +1,66 @@
+---
+- name: Stop Coolify containers
+  community.docker.docker_container:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - coolify
+    - coolify-redis
+    - coolify-realtime
+    - coolify-proxy
+  ignore_errors: true
+
+- name: Upload database dump
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/coolify_db.dump"
+    dest: /tmp/coolify_db.dump
+    mode: '0600'
+
+- name: Restore database
+  ansible.builtin.shell: |
+    cat /tmp/coolify_db.dump | docker exec -i coolify-db pg_restore --verbose --clean --no-acl --no-owner -U coolify -d coolify
+  register: restore_result
+  failed_when: 
+    - restore_result.rc != 0
+    - "'errors ignored on restore' not in restore_result.stderr"
+  changed_when: true
+
+- name: Clean up existing SSH keys
+  ansible.builtin.file:
+    path: /data/coolify/ssh/keys
+    state: absent
+
+- name: Recreate SSH keys directory
+  ansible.builtin.file:
+    path: /data/coolify/ssh/keys
+    state: directory
+    mode: '0700'
+    owner: root
+    group: root
+
+- name: Upload and extract SSH keys
+  ansible.builtin.unarchive:
+    src: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/coolify_ssh_keys.tar.gz"
+    dest: /data/coolify/ssh/keys
+    remote_src: false
+
+- name: Read saved APP_KEY from local file
+  ansible.builtin.set_fact:
+    previous_app_key: "{{ lookup('file', playbook_dir + '/../backups/' + inventory_hostname + '/reinstall/APP_KEY') }}"
+
+- name: Update .env with APP_PREVIOUS_KEYS
+  ansible.builtin.lineinfile:
+    path: /data/coolify/source/.env
+    line: "APP_PREVIOUS_KEYS={{ previous_app_key }}"
+    regexp: "^APP_PREVIOUS_KEYS="
+    state: present
+
+- name: Re-run Coolify installation script to apply changes
+  ansible.builtin.command: "/root/install.sh"
+  register: reinstall_result
+  changed_when: true
+
+- name: Remove temporary dump on remote
+  ansible.builtin.file:
+    path: /tmp/coolify_db.dump
+    state: absent

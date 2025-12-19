@@ -1,1 +1,1 @@
-public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/vm-worker.pub', errors='ignore') or lookup('file', '/.ssh/hostuk.pub', errors='ignore') or '' }}"
+public_key: ""

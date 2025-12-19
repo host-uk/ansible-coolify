@@ -3,6 +3,15 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  pre_tasks:
+    - name: Ensure ssh-agent is running
+      ansible.builtin.shell: |
+        if ! pgrep -u "{{ lookup('env', 'USER') }}" ssh-agent > /dev/null; then
+          ssh-agent -s
+        fi
+      register: ssh_agent_setup
+      changed_when: "'Agent pid' in ssh_agent_setup.stdout"
+
   tasks:
     - name: Ensure Parallels VM is ready
       ansible.builtin.include_role:

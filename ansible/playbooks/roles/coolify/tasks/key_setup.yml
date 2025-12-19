@@ -1,0 +1,37 @@
+---
+- name: Add Private Key to Coolify
+  ansible.builtin.uri:
+    url: "http://localhost:8000/api/v1/security/keys"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ coolify_key_name }}"
+      private_key: "{{ lookup('file', coolify_private_key_path) }}"
+    status_code: [200, 201, 422]
+  register: key_reg_result
+  when: not ansible_check_mode
+
+- name: Get Private Key UUID
+  ansible.builtin.set_fact:
+    coolify_key_uuid: "{{ key_reg_result.json.uuid if key_reg_result is not skipped and key_reg_result.status | default(0) in [200, 201] else '' }}"
+
+- name: List Private Keys if not registered (find existing)
+  ansible.builtin.uri:
+    url: "http://localhost:8000/api/v1/security/keys"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+  register: keys_list
+  when: 
+    - not ansible_check_mode
+    - coolify_key_uuid == ""
+
+- name: Find existing key UUID
+  ansible.builtin.set_fact:
+    coolify_key_uuid: "{{ (keys_list.json | selectattr('name', 'equalto', coolify_key_name) | first).uuid if keys_list is not skipped and keys_list.json is defined else coolify_key_uuid }}"
+  when: 
+    - not ansible_check_mode
+    - coolify_key_uuid == ""

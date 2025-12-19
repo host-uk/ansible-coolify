@@ -71,8 +71,23 @@
     - ansible_os_family == 'Debian'
     - coolify_env_file.stat.exists
 
-- name: Register Worker in Coolify
-  ansible.builtin.include_tasks: register_worker.yml
+- name: Setup Coolify API and Token
+  ansible.builtin.include_tasks: api_setup.yml
+  when: 
+    - coolify_register_worker | bool
+    - ansible_os_family == 'Debian'
+
+- name: Setup Private Key in Coolify
+  ansible.builtin.include_tasks: key_setup.yml
+  when: 
+    - coolify_register_worker | bool
+    - ansible_os_family == 'Debian'
+
+- name: Register Workers in Coolify
+  ansible.builtin.include_tasks: server_setup.yml
+  loop: "{{ coolify_workers | default([]) }}"
+  loop_control:
+    loop_var: worker_item
   when: 
     - coolify_register_worker | bool
     - ansible_os_family == 'Debian'
