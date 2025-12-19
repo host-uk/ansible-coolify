@@ -1,0 +1,16 @@
+---
+- name: Create Database
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/databases/{{ coolify_database_type }}"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body: "{{ coolify_database_body }}"
+    status_code: [200, 201]
+  register: create_database_result
+
+- name: Set Database UUID fact
+  ansible.builtin.set_fact:
+    coolify_database_uuid: "{{ create_database_result.json.uuid if create_database_result.json is defined else '' }}"

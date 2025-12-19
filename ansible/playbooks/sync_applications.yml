@@ -16,9 +16,49 @@
       register: dev_apps
       when: inventory_hostname == 'vm-controller'
 
-    - name: Save Applications to local fact
+    - name: Fetch Services
+      ansible.builtin.uri:
+        url: "http://localhost:8000/api/v1/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: dev_services
+      when: inventory_hostname == 'vm-controller'
+
+    - name: Fetch Databases
+      ansible.builtin.uri:
+        url: "http://localhost:8000/api/v1/databases"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: dev_databases
+      when: inventory_hostname == 'vm-controller'
+
+    - name: Fetch Projects
+      ansible.builtin.uri:
+        url: "http://localhost:8000/api/v1/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: dev_projects
+      when: inventory_hostname == 'vm-controller'
+
+    - name: Fetch Servers
+      ansible.builtin.uri:
+        url: "http://localhost:8000/api/v1/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: dev_servers
+      when: inventory_hostname == 'vm-controller'
+
+    - name: Save Data to local fact
       ansible.builtin.set_fact:
-        global_dev_apps: "{{ dev_apps.json }}"
+        global_dev_apps: "{{ dev_apps.json if dev_apps.json is defined else [] }}"
+        global_dev_services: "{{ dev_services.json if dev_services.json is defined else [] }}"
+        global_dev_databases: "{{ dev_databases.json if dev_databases.json is defined else [] }}"
+        global_dev_projects: "{{ dev_projects.json if dev_projects.json is defined else [] }}"
+        global_dev_servers: "{{ dev_servers.json if dev_servers.json is defined else [] }}"
       delegate_to: localhost
       delegate_facts: true
       when: inventory_hostname == 'vm-controller'
@@ -48,6 +88,43 @@
         coolify_application_git_repository: "{{ item.git_repository | default('') }}"
         coolify_application_git_branch: "{{ item.git_branch | default('') }}"
       loop: "{{ hostvars['localhost']['global_dev_apps'] }}"
-      when: hostvars['localhost']['global_dev_apps'] is defined
+      when: hostvars['localhost']['global_dev_apps'] is defined and hostvars['localhost']['global_dev_apps'] | length > 0
       loop_control:
-        label: "{{ item.name }}"
+        label: "App: {{ item.name }}"
+
+    - name: Process and Create Services on Production
+      ansible.builtin.include_role:
+        name: coolify-service
+      vars:
+        coolify_api_token: "{{ coolify_api_token }}"
+        coolify_service_type: "{{ item.service_type }}"
+        coolify_service_project_uuid: "FIXME_PROJECT_UUID"
+        coolify_service_server_uuid: "FIXME_SERVER_UUID"
+        coolify_service_environment_name: "{{ item.environment.name }}"
+        coolify_service_name: "{{ item.name }}"
+        coolify_service_description: "{{ item.description | default('') }}"
+        coolify_service_docker_compose_raw: "{{ item.docker_compose_raw | default('') }}"
+      loop: "{{ hostvars['localhost']['global_dev_services'] }}"
+      when: hostvars['localhost']['global_dev_services'] is defined and hostvars['localhost']['global_dev_services'] | length > 0
+      loop_control:
+        label: "Service: {{ item.name }}"
+
+    - name: Process and Create Databases on Production
+      ansible.builtin.include_role:
+        name: coolify-database
+      vars:
+        coolify_api_token: "{{ coolify_api_token }}"
+        # Extract database type from image or tags if not explicitly provided
+        coolify_database_type: "{{ item.type | default('postgresql') }}"
+        coolify_database_body:
+          project_uuid: "FIXME_PROJECT_UUID"
+          server_uuid: "FIXME_SERVER_UUID"
+          environment_name: "{{ item.environment.name }}"
+          name: "{{ item.name }}"
+          description: "{{ item.description | default('') }}"
+          instant_deploy: true
+          # Add more fields as needed, these are the common ones
+      loop: "{{ hostvars['localhost']['global_dev_databases'] }}"
+      when: hostvars['localhost']['global_dev_databases'] is defined and hostvars['localhost']['global_dev_databases'] | length > 0
+      loop_control:
+        label: "DB: {{ item.name }}"

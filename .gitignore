@@ -41,3 +41,4 @@ logs
 .ssh/
 dev/
 ansible/backups/
+/.output.txt
