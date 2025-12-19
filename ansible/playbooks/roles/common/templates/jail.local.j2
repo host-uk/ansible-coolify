@@ -2,5 +2,6 @@
 enabled  = true
 port     = ssh
 filter   = sshd
-logpath  = /var/log/fail2ban.log
-banaction = iptables-multiport
+logpath  = /var/log/auth.log
+maxretry = 3
+bantime  = 1h

@@ -1,10 +1,42 @@
-servers:
+all:
   children:
+    # Environment groups: Use these with --limit (e.g., -l production)
+    production:
+      hosts:
+        noc.host.uk.com:
+        de.host.uk.com:
+        de2.host.uk.com:
+        build.de.host.uk.com:
+    development:
+      hosts:
+        lab.snider.dev:
+        localhost:
+        vm-worker:
+
+    # Role-based groups
+    app_servers:
+      hosts:
+        de.host.uk.com:
+        de2.host.uk.com:
+    monitoring:
+      hosts:
+        noc.host.uk.com:
+    builders:
+      hosts:
+        build.de.host.uk.com:
+
+    # Functional groups: Used by playbooks
     controller:
       hosts:
-        controller.coolify.ujstor.com:
+        noc.host.uk.com:
+        lab.snider.dev:
+          ansible_host: dev.host.uk.com
+        localhost:
+          ansible_connection: local
     worker:
       hosts:
-        worker-1.coolify.ujstor.com:
-        worker-2.coolify.ujstor.com:
-        worker-3.coolify.ujstor.com:
+        de.host.uk.com:
+        de2.host.uk.com:
+        build.de.host.uk.com:
+        vm-worker:
+          ansible_host: 192.168.1.100 # Replace with your VM IP

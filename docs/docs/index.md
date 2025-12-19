@@ -1,25 +1,19 @@
-# Self hosting infrastructure cluster
+# Bare Metal Coolify Infrastructure
 
-Infra for utilizing Hetzner low-cost VPS and Docker containers, wrapped in [Coolify](https://coolify.io) as an all-in-one PaaS, to self-host your own applications, databases, or services.
-
-![diagram](./public/01_infra_diagram.svg)
+Infrastructure for setting up bare metal servers (Ubuntu 24.04) and Docker containers, utilizing [Coolify](https://coolify.io) as an all-in-one PaaS to self-host your own applications, databases, or services.
 
 ## Prerequisites
 
 Before you begin, ensure you have the following:
 
-- [Hetzner Cloud account](https://hetzner.cloud/?ref=Ix9xCKNxJriM) 
-- [Terraform](https://www.terraform.io/downloads.html)
-- [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html)
+- Bare metal or VPS servers running Ubuntu 24.04 LTS (amd64).
+- SSH access to the servers.
+- [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html) (can be run via Docker).
 
-Terraform modules have been moved to separate ***[repository](https://github.com/Ujstor/terraform-hetzner-modules)*** that contain Hetzner Cloud and Cloudflare resources, and they are referenced through source and release.
+## Infrastructure Overview
 
-All infrastructure components, except for the server, are optional, and you can choose whether to use them.
-Refrence [examples](https://github.com/Ujstor/terraform-hetzner-modules/tree/master/examples) in hetzner-terraform-modules repository.
-
-## Note
-If you want to use Terraform state backed on AWS and back up your SSH key to S3, you need an AWS account and must configure your AWS CLI. These configurations are optional and are placed in a global directory.
-
-Otherwise, remove the backend configuration from terraform.tf in the Coolify Hetzner infrastructure directory.
-
-Managin DNS records with Cloudflare is also optional. If you want to use it, you need to create an account and configure your API key.
+The setup currently supports the following servers:
+- `noc.host.uk.com`: Production Coolify Controller, Monitoring (Beszel), and Error Tracking (Sentry.io).
+- `lab.snider.dev`: Development Coolify Controller.
+- `de.host.uk.com`, `de2.host.uk.com`: Application worker hosts.
+- `build.de.host.uk.com`: Dedicated Docker build server.

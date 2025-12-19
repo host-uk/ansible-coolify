@@ -3,7 +3,7 @@
   hosts: controller
   become: true
   become_user: root
-  gather_facts: false
+  gather_facts: true
   roles:
     - role: common
   tasks:
@@ -15,27 +15,42 @@
         - 6001
         - 6002
         - 8000
+      when: ansible_os_family == 'Debian'
+
+    - name: Check if Coolify is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/coolify
+      register: coolify_bin
 
     - name: Download Coolify installation script
       ansible.builtin.get_url:
         url: "https://cdn.coollabs.io/coolify/install.sh"
-        dest: "~/install.sh"
+        dest: "/root/install.sh"
         mode: "0770"
+      when: 
+        - not coolify_bin.stat.exists
+        - ansible_os_family == 'Debian'
 
     - name: Execute Coolify installation script
-      ansible.builtin.command: "~/install.sh"
+      ansible.builtin.command: "/root/install.sh"
       register: install_result
-      changed_when: install_result.rc != 0
+      changed_when: "'Installation completed' in install_result.stdout"
+      when: 
+        - not coolify_bin.stat.exists
+        - ansible_os_family == 'Debian'
 
     - name: Debug installation script output
       ansible.builtin.debug:
         var: install_result.stdout_lines
+      when: 
+        - not coolify_bin.stat.exists
+        - ansible_os_family == 'Debian'
 
 - name: Worker configuration
   hosts: worker
   become: true
   become_user: root
-  gather_facts: false
+  gather_facts: true
   roles:
     - role: common
 
@@ -45,5 +60,9 @@
         rule: allow
         port: "{{ item }}"
       loop:
+        - 22
+        - 80
+        - 443
         - 6001
         - 6002
+      when: ansible_os_family == 'Debian'

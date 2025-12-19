@@ -1,47 +1,72 @@
-## 1. Generate Hetzner API Token
+## 1. Prepare Your Bare Metal Servers
 
-Create a new project in the Hetzner [console](https://console.hetzner.cloud/projects) to obtain an API token.
+Ensure your servers are running Ubuntu 24.04 LTS (amd64). You should have SSH access to these servers as root or a user with sudo privileges.
 
-## 2. Configure Infrastructure
+The following servers are configured in this setup:
+- `noc.host.uk.com` (Production Controller - Beszel, Sentry.io)
+- `lab.snider.dev` (Development Controller)
+- `de.host.uk.com` (App Server - dc14)
+- `de2.host.uk.com` (App Server - dc13)
+- `build.de.host.uk.com` (Docker Build server)
 
-Determine the specifications of your cluster, such as the number of servers, network topology, server types, and domains.
+## 2. Configure Ansible Inventory
 
-You can find example configurations in the [/modules/examples directory](https://github.com/Ujstor/terraform-hetzner-modules/tree/master/examples), and additional usage instructions are provided in the documentation.
-
-## 3. Initialize and Apply Terraform
-
-Initialize and apply the Terraform configuration:
-
-```shell
-terraform init --upgrade
-terraform validate
-terraform apply
-```
-
-## 4. Define Hosts and Run Ansible Playbook
-
-In the `inventory/inventory.yml` file, specify the IP addresses or DNS of the servers you created. You can find these in the Terraform output or verify them in the Hetzner Cloud console.
-
-Ensure that you know the location of the SSH keys you created. If the key names differ from the default values in the Terraform configuration, update the paths in `ansible/ansible.cfg` as needed.
+Update the `ansible/inventory/inventory.yml` file. This repository supports both **production** and **development** environments using Ansible groups and the `--limit` flag.
 
 ### Inventory File Example
 
 ```yaml
-servers:
+all:
   children:
+    # Environment groups: Use these with --limit (e.g., -l production)
+    production:
+      hosts:
+        noc.host.uk.com:
+        de.host.uk.com:
+        de2.host.uk.com:
+        build.de.host.uk.com:
+    development:
+      hosts:
+        lab.snider.dev:
+        localhost:
+        vm-worker:
+
+    # Role-based groups
+    app_servers:
+      hosts:
+        de.host.uk.com:
+        de2.host.uk.com:
+    monitoring:
+      hosts:
+        noc.host.uk.com:
+    builders:
+      hosts:
+        build.de.host.uk.com:
+
+    # Functional groups: Used by playbooks
     controller:
       hosts:
-        controller.coolify.ujstor.com:
+        noc.host.uk.com:
+        lab.snider.dev:
+          ansible_host: dev.host.uk.com
+        localhost:
+          ansible_connection: local
     worker:
       hosts:
-        worker-1.coolify.ujstor.com:
-        worker-2.coolify.ujstor.com:
-        worker-3.coolify.ujstor.com:
+        de.host.uk.com:
+        de2.host.uk.com:
+        build.de.host.uk.com:
+        vm-worker:
+          ansible_host: 192.168.1.100 # Replace with your VM IP
 ```
 
-### Run Ansible in a Docker Container
+## 3. Prepare SSH Keys
 
-You can run Ansible in a Docker container or locally. If ansible running locally, check the inventory and SSH key paths in `ansible.cfg`.
+Ensure your SSH public key is available at the path specified in `ansible/playbooks/roles/common/defaults/main.yml` (default is `/secrets/ssh_key.pub` when running in Docker).
+
+## 4. Run Ansible in a Docker Container
+
+You can run Ansible in a Docker container to ensure a consistent environment.
 
 ```shell
 cd ansible
@@ -49,55 +74,39 @@ docker build -t ansible-coolify .
 
 docker run -it --rm \
   -v ./inventory/inventory.yml:/config/inventory.yml \
-  -v /path/to/.ssh/coolify_cluster_prod_key:/secrets/ssh_key \
-  -v /path/to/.ssh/coolify_cluster_prod_key.pub:/secrets/ssh_key.pub \
+  -v /path/to/your/.ssh/id_rsa:/secrets/ssh_key \
+  -v /path/to/your/.ssh/id_rsa.pub:/secrets/ssh_key.pub \
   ansible-coolify
 ```
 
-You can also use a prebuilt image from the GitHub Actions pipeline, such as `ansible-coolify-deploy:0.0.1`.
+## 5. Run the Ansible Playbook
 
-### Run the Ansible Playbook
+Inside the container (or locally), run the playbook to install Coolify and harden the servers. **Always use the `--limit` (or `-l`) flag to specify which environment you are targeting.**
 
-To deploy Coolify, run the Ansible playbook:
-
+### For Production
 ```shell
-ansible-playbook playbooks/playbook_install_coolify.yml
+ansible-playbook -l production playbooks/playbook_install_coolify.yml
 ```
 
-The Ansible playbook automates the installation of Coolify on the controller hosts. It also configures key dependencies and strengthens system security across both the controller and worker hosts by performing the following actions:
-
-- Updates and upgrades all packages.
-- Installs necessary dependencies, including UFW and Fail2Ban, for enhanced system security.
-- Sets up UFW to allow specific incoming traffic, and enables it.
-- Configures Fail2Ban to block unauthorized access attempts.
-- Implements SSH hardening measures for secure remote access.
-- Installs and configures Coolify on controller hosts to listen on specified ports.
-- Sets up worker hosts to allow incoming traffic on the ports required for Coolify.
-
-## 5. Open the Coolify UI
-
-After Ansible completes, you can access Coolify's UI at:
-
+### For Development (Testing)
 ```shell
-CONTROLLER_SERVER_IP:8000
+ansible-playbook -l development playbooks/playbook_install_coolify.yml
 ```
 
-Follow the prompts to configure Coolify. Use the private key created by Terraform, enter the private IPs of your worker nodes, and add them to your cluster. Refer to the [Coolify documentation](https://coolify.io/docs/) for further steps.
+The Ansible playbook:
+- Updates and upgrades all packages (Ubuntu 24.04).
+- Installs UFW and Fail2Ban for security.
+- Hardens SSH configuration.
+- Installs Coolify on the controller host.
+- Configures workers for Coolify communication.
 
-## 6. SSH into the Server
+## 6. Access Coolify UI
 
-Terraform generates the SSH keys, which are added to Hetzner and the servers, and are also used by Ansible. Keep these keys secure, as losing them could prevent access to the servers.
+Once the playbook finishes, access Coolify at:
+- **Production**: `https://noc.host.uk.com:8000`
+- **Development**: `https://lab.snider.dev:8000` (or your controller's IP)
 
-To SSH into a server, use the following command:
+## 7. Post-Installation
 
-```shell
-ssh root@<server-ip> -i /path/to/.ssh/coolify_cluster_prod_key
-```
-
-## 7. Destroy Infrastructure
-
-To delete the infrastructure, run the following command:
-
-```shell
-terraform destroy
-```
+Use the Coolify API or UI to further configure your infrastructure.
+For `noc.host.uk.com`, you can now deploy Beszel and Sentry.io using Coolify's Docker-based deployments.

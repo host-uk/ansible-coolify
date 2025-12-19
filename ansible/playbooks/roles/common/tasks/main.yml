@@ -2,16 +2,19 @@
 - name: Update package lists
   ansible.builtin.apt:
     update_cache: true
+  when: ansible_os_family == 'Debian'
 
 - name: Upgrade all packages
   ansible.builtin.apt:
     upgrade: true
+  when: ansible_os_family == 'Debian'
 
 - name: Install public AuthorizedKeysFile
   ansible.posix.authorized_key:
     user: root
     state: present
     key: "{{ public_key }}"
+  when: ansible_os_family == 'Debian'
 
 - name: Install required packages
   ansible.builtin.package:
@@ -19,11 +22,13 @@
       - ufw
       - fail2ban
     state: present
+  when: ansible_os_family == 'Debian'
 
 - name: Enable UFW
   community.general.ufw:
     state: enabled
     policy: allow
+  when: ansible_os_family == 'Debian'
 
 
 - name: Allow incoming traffic on specified ports
@@ -34,23 +39,29 @@
     - 22
     - 80
     - 443
+  when: ansible_os_family == 'Debian'
 
 - name: Configure Fail2Ban
   ansible.builtin.template:
     src: jail.local.j2
     dest: /etc/fail2ban/jail.local
     mode: preserve
+  when: ansible_os_family == 'Debian'
 
 - name: Restart fail2ban
   ansible.builtin.service:
     name: fail2ban
     state: restarted
+  when: ansible_os_family == 'Debian'
 
 - name: Ensure no conflicting PermitRootLogin in sshd_config
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^PermitRootLogin'
     state: absent
+  when: 
+    - ansible_os_family == 'Debian'
+    - ansible_connection != 'local'
 
 - name: SSH Hardening for root user
   ansible.builtin.blockinfile:
@@ -63,8 +74,14 @@
       AllowTcpForwarding no
       AllowAgentForwarding no
       AuthorizedKeysFile .ssh/authorized_keys
+  when: 
+    - ansible_os_family == 'Debian'
+    - ansible_connection != 'local'
 
 - name: Restart sshd
   ansible.builtin.service:
     name: sshd
     state: restarted
+  when: 
+    - ansible_os_family == 'Debian'
+    - ansible_connection != 'local'
