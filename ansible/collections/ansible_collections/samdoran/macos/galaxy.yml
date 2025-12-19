@@ -1,0 +1,27 @@
+namespace: samdoran
+name: macos
+version: 2.6.2
+readme: README.md
+authors:
+  - Sam Doran <sdoran@redhat.com>
+
+description: Roles and custom content for manangig macOS
+
+license:
+  - GPL-2.0-or-later
+
+tags:
+  - development
+  - system
+  - macos
+  - xcode
+  - python
+
+dependencies: {}
+
+repository: https://github.com/samdoran/ansible-collection-macos
+documentation: https://github.com/samdoran/ansible-collection-macos?tab=readme-ov-file#readme
+homepage: https://github.com/samdoran/ansible-collection-macos
+issues: https://github.com/samdoran/ansible-collection-macos/issues
+
+build_ignore: []

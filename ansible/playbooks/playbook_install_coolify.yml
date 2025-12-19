@@ -1,4 +1,16 @@
 ---
+- name: Prepare Parallels VMs for development
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Ensure Parallels VM is ready
+      ansible.builtin.include_role:
+        name: parallels_vm
+      when: "'vm-worker' in groups['development']"
+  tags:
+    - parallels_vm
+
 - name: Install Coolify on controller host
   hosts: controller
   become: true
