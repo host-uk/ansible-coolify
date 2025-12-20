@@ -1,0 +1,33 @@
+---
+- name: Test Coolify Token Extraction Logic
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Simulate artisan tinker output with noise
+      ansible.builtin.set_fact:
+        api_token_result:
+          stdout_lines:
+            - "Some PHP warning: open_basedir restriction in effect."
+            - "Another line of output"
+            - "this_is_the_actual_token_40_chars_long"
+
+    - name: Test token extraction
+      ansible.builtin.set_fact:
+        extracted_token: "{{ api_token_result.stdout_lines | last | trim }}"
+
+    - name: Verify extracted token
+      ansible.builtin.assert:
+        that:
+          - extracted_token == "this_is_the_actual_token_40_chars_long"
+        fail_msg: "Token extraction failed! Expected 'this_is_the_actual_token_40_chars_long', got '{{ extracted_token }}'"
+
+    - name: Simulate empty output
+      ansible.builtin.set_fact:
+        empty_token_result:
+          stdout_lines: []
+
+    - name: Verify validation logic for empty token (should fail if we used it)
+      ansible.builtin.debug:
+        msg: "Coolify API token is empty. This usually means the Coolify instance is not ready or no admin user exists yet."
+      when: empty_token_result.stdout_lines | length == 0

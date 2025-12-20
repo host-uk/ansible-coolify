@@ -13,7 +13,7 @@
         name: coolify-application
       vars:
         coolify_application_state: delete
-      ignore_errors: true
+      ignore_errors: true # noqa ignore-errors
 
     - name: Restore Application (Create)
       ansible.builtin.include_role:

@@ -27,6 +27,7 @@
 
 - name: Get latest backup info via Tinker
   ansible.builtin.shell: |
+    set -o pipefail
     docker exec coolify php artisan tinker --execute='
     $execution = \Illuminate\Support\Facades\DB::table("scheduled_database_backup_executions")
         ->latest()
@@ -38,6 +39,7 @@
     }
     '
   register: tinker_backup_info
+  changed_when: false
   until: 
     - tinker_backup_info.stdout != "null"
     - (tinker_backup_info.stdout | from_json).status == 'success'
@@ -58,7 +60,7 @@
   ansible.builtin.find:
     paths: /data/coolify/backups/instance
     patterns: "*.tar.gz"
-    recurse: no
+    recurse: false
   register: coolify_instance_backups
   when: "'controller' in group_names"
 
@@ -70,10 +72,12 @@
   when: 
     - "'controller' in group_names"
     - coolify_instance_backups.matched > 0
-  ignore_errors: true
+  failed_when: false
 
 - name: Get APP_KEY from .env
-  ansible.builtin.shell: grep '^APP_KEY=' /data/coolify/source/.env | cut -d'=' -f2-
+  ansible.builtin.shell: |
+    set -o pipefail
+    grep '^APP_KEY=' /data/coolify/source/.env | cut -d'=' -f2-
   register: app_key_raw
   changed_when: false
 

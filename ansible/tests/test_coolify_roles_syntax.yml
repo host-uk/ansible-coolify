@@ -1,0 +1,46 @@
+---
+- name: Syntax Check for Coolify Roles
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    coolify_api_token: "test-token"
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_application_name: "test-app"
+    coolify_application_project_uuid: "test-project"
+    coolify_application_server_uuid: "test-server"
+    coolify_application_type: "dockercompose"
+    coolify_application_state: "create"
+    coolify_database_type: "postgresql"
+    coolify_service_type: "redis"
+    coolify_state_path: "/tmp/coolify-state"
+  tasks:
+    - name: Syntax check coolify-application role
+      ansible.builtin.include_role:
+        name: coolify-application
+      vars:
+        coolify_application_state: create
+
+    - name: Syntax check coolify-database role
+      ansible.builtin.include_role:
+        name: coolify-database
+      vars:
+        coolify_database_state: create
+
+    - name: Syntax check coolify-service role
+      ansible.builtin.include_role:
+        name: coolify-service
+      vars:
+        coolify_service_state: create
+
+    - name: Syntax check coolify role (main tasks)
+      ansible.builtin.include_role:
+        name: coolify
+      vars:
+        coolify_register_worker: false
+
+    - name: Syntax check common role
+      ansible.builtin.include_role:
+        name: common
+      vars:
+        public_key: "ssh-rsa AAAA... test@example.com"

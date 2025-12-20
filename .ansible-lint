@@ -5,3 +5,7 @@ skip_list:
   - yaml[brackets]
   - var-naming[no-role-prefix]
   - yaml[line-length]
+
+exclude_paths:
+  - ansible/collections/
+  - ansible/state/

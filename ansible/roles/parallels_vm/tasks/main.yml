@@ -11,14 +11,32 @@
   ansible.builtin.set_fact:
     vm_exists: "{{ parallels_facts_initial.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | list | length > 0 }}"
 
-- name: Create VM if it doesn't exist
-  ansible.builtin.command: "prlctl create {{ parallels_vm_name }} --distribution ubuntu --ostype linux"
+- name: Check if template exists
+  ansible.builtin.stat:
+    path: "{{ parallels_vm_template }}"
+  register: template_stat
+  when: not vm_exists
+
+- name: Fail if template is missing
+  ansible.builtin.fail:
+    msg: "Template not found at {{ parallels_vm_template }}. Please ensure the template exists or override 'parallels_vm_template' variable."
+  when: 
+    - not vm_exists
+    - not template_stat.stat.exists
+
+- name: Create VM from template if it doesn't exist
+  ansible.builtin.command: "prlctl clone {{ parallels_vm_template }} --name {{ parallels_vm_name }}"
   when: not vm_exists
   changed_when: true
 
 - name: Get VM status
   ansible.builtin.set_fact:
     vm_status: "{{ (parallels_facts_initial.ansible_facts.parallels.VMs | selectattr('name', 'equalto', parallels_vm_name) | first).status if vm_exists else 'stopped' }}"
+
+- name: Configure VM resources
+  ansible.builtin.command: "prlctl set {{ parallels_vm_name }} --cpus {{ parallels_vm_cpu }} --memsize {{ parallels_vm_memory }}"
+  when: not vm_exists
+  changed_when: true
 
 - name: Start VM if stopped
   ansible.builtin.command: "prlctl start {{ parallels_vm_name }}"

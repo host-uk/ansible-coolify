@@ -272,9 +272,17 @@ dev-clear-host-uk-lon:
 	$(MAKE) dev-empty-env ENV=lon.host.uk.com PROJECT=host.uk.com
 
 lint:
-	ansible-lint ansible/
+	cd ansible && ansible-lint playbooks/ roles/
 
-test:
+test: test-syntax test-logic test-parallels
+
+test-syntax:
+	cd ansible && ansible-playbook --syntax-check tests/test_coolify_roles_syntax.yml
+
+test-logic:
+	cd ansible && ansible-playbook tests/test_coolify_token.yml
+
+test-parallels:
 	cd ansible && ansible-playbook -i inventory/inventory.yml tests/test_parallels_vm.yml $(EXTRA_VARS)
 
 # --- Configuration Tests ---
@@ -301,10 +309,10 @@ prod-docker-deploy:
 	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l production playbooks/coolify/create.yml
 
 docker-test:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook tests/test_parallels_vm.yml
+	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) /bin/sh -c "cd /ansible && ansible-playbook tests/test_coolify_token.yml && ansible-playbook tests/test_parallels_vm.yml"
 
 docker-lint:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-lint .
+	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) /bin/sh -c "cd /ansible && ansible-lint playbooks/ roles/"
 
 # --- General ---
 

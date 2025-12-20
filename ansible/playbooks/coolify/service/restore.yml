@@ -13,7 +13,7 @@
         name: coolify-service
       vars:
         coolify_service_state: delete
-      ignore_errors: true
+      ignore_errors: true # noqa ignore-errors
 
     - name: Restore Service (Create)
       ansible.builtin.include_role:

@@ -13,10 +13,13 @@
       changed_when: "'Agent pid' in ssh_agent_setup.stdout"
 
   tasks:
-    - name: Ensure Parallels VM is ready
+    - name: Ensure Parallels VMs are ready
       ansible.builtin.include_role:
         name: parallels_vm
-      when: "'vm-worker' in groups['development']"
+      vars:
+        parallels_vm_name: "{{ item | replace('.lan', '') }}"
+      loop: "{{ groups['development'] | select('search', 'vm-') | list }}"
+      when: groups['development'] is defined
   tags:
     - parallels_vm
 
