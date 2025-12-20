@@ -1,13 +1,13 @@
 ### State Management
 
-To ensure that infrastructure can be reconstructed and critical application data is never lost, this project implements a "State Store" pattern using the local directory `ansible/state`.
+To ensure that infrastructure can be reconstructed and critical application data is never lost, this project implements a "State Store" pattern using the local directory `state`.
 
-#### The `ansible/state` Directory
+#### The `state` Directory
 
 This directory is host-specific and is ignored by git to protect secrets and large binary dumps. It is structured as follows:
 
 ```text
-ansible/state/
+state/
 └── <inventory_hostname>/
     ├── .ssh/
     │   └── ssh_host_*         # Public and private host keys retrieved from the baremetal host (/etc/ssh and /root/.ssh)
@@ -33,7 +33,7 @@ ansible/state/
 
 #### Backup and Restore Workflow
 
-1.  **Backup**: Run `make dev-backup`. This triggers a series of `ansible.builtin.fetch` tasks that pull state from the remote host to `ansible/state`.
+1.  **Backup**: Run `make dev-backup`. This triggers a series of `ansible.builtin.fetch` tasks that pull state from the remote host to `state`.
 2.  **S3 Remote Backup**: After the local backup is complete, the state directory is compressed, encrypted using the `hostuk` SSH key, and uploaded to the private **HostUK S3 Storage** (Hetzner Object Storage) for disaster recovery.
 3.  **Restore**: Run `make dev-restore`. This pushes the local state back to a fresh instance and runs the installation script to "heal" the environment.
 
@@ -44,7 +44,7 @@ This project distinguishes between two separate S3-compatible buckets, both host
 1.  **HostUK Private Storage (`hostuk`)**: Used for encrypted infrastructure backups (State Store).
 2.  **Coolify Public Storage (`host-uk`)**: Used for public application files (assets, uploads, etc.).
 
-The configuration is primarily managed in `ansible/inventory/inventory.yml` under the `all.vars` section, allowing for environment-specific overrides:
+The configuration is primarily managed in `inventory/inventory.yml` under the `all.vars` section, allowing for environment-specific overrides:
 
 **S3 Storage (Unified):**
 - `s3_enabled`: Enable/disable S3 features (Backup and App storage).

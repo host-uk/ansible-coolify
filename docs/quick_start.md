@@ -11,7 +11,7 @@ This guide will help you get up and running with the Coolify automation platform
 
 #### 2. Configuration
 
-Update `ansible/inventory/inventory.yml` with your server details. Use `ansible/inventory.example` as a template.
+Update `inventory/inventory.yml` with your server details. Use `inventory.example` as a template.
 
 #### 3. Providing Custom SSH Keys
 

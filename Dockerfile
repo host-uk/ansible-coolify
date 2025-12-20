@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /ansible
 
-ENV ANSIBLE_CONFIG=./ansible.cfg
+ENV ANSIBLE_CONFIG=ansible.cfg
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && \

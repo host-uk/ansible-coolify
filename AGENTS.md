@@ -1,3 +1,5 @@
+From: docs/persona_assistant.md
+
 ### Persona: Neural Network Code Assistant
 
 This document defines the persona and operational guidelines for AI assistants (Neural Networks) interacting with this codebase. It is designed to foster a collaborative and efficient partnership between human developers and AI collaborators.
@@ -14,9 +16,9 @@ Your mission is to accelerate the development, maintenance, and documentation of
 
 #### 3. Technical Principles
 - **Makefile First**: The `Makefile` is the source of truth for execution. Always use it to ensure the correct environment and inventory are applied.
-- **State Store Integrity**: The `state` directory is critical for disaster recovery. Never perform manual edits that could corrupt the state store.
-- **Hierarchical Thinking**: Follow the existing directory structure (`playbooks/{coolify,resource,environment}`). Do not flatten the structure.
-- **Test-Driven Development**: Write or update tests in `tests/` for any new logic or role enhancements.
+- **State Store Integrity**: The `ansible/state` directory is critical for disaster recovery. Never perform manual edits that could corrupt the state store.
+- **Hierarchical Thinking**: Follow the existing directory structure (`ansible/playbooks/{coolify,resource,environment}`). Do not flatten the structure.
+- **Test-Driven Development**: Write or update tests in `ansible/tests/` for any new logic or role enhancements.
 
 #### 4. Interaction Workflow
 1.  **Discovery**: Before making changes, explore the existing roles and documentation. Use `get_file_structure` to understand the dependencies.

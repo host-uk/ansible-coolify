@@ -4,7 +4,7 @@ This document provides step-by-step instructions for common tasks in this projec
 
 #### 1. Adding a New Application
 To deploy a new application to Coolify via Ansible:
-1.  **Create a Playbook**: Create a new file in `ansible/playbooks/coolify/application/` (e.g., `my-new-app.yml`).
+1.  **Create a Playbook**: Create a new file in `playbooks/coolify/application/` (e.g., `my-new-app.yml`).
 2.  **Define the Role**:
     ```yaml
     - name: Deploy My App
@@ -57,14 +57,14 @@ Similar to applications, use the `coolify-database` role:
 ```
 
 #### 3. Registering a New Worker
-1.  **Update Inventory**: Add the new host to the `worker` group in `ansible/inventory/inventory.yml`.
+1.  **Update Inventory**: Add the new host to the `worker` group in `inventory/inventory.yml`.
 2.  **Run the Create Playbook**:
     ```bash
     make dev-deploy # This will register any new workers defined in the inventory
     ```
 
 #### 4. Backing Up and Restoring
-- **Backup**: `make dev-backup` fetches critical files to `ansible/state/`.
+- **Backup**: `make dev-backup` fetches critical files to `state/`.
 - **Restore**: `make dev-restore` uses those files to rebuild the instance.
 
 #### 5. Cloning an Environment

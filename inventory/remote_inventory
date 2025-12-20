@@ -13,7 +13,7 @@ import sys
 def get_hcloud_inventory(project_root):
     """Fetch inventory using the HCloud plugin via a hidden config file."""
     # Path to the hidden HCloud inventory config
-    config_path = os.path.join(project_root, 'ansible', 'inventory', '.hcloud.yml')
+    config_path = os.path.join(project_root, 'inventory', '.hcloud.yml')
     
     if not os.path.exists(config_path):
         return {"_meta": {"hostvars": {}}, "all": {"children": ["ungrouped"]}}
@@ -35,10 +35,10 @@ def get_hcloud_inventory(project_root):
         }
 
 def main():
-    # Determine project root (2 levels up from ansible/inventory/)
-    # Current script is in ansible/inventory/
+    # Determine project root (1 level up from inventory/)
+    # Current script is in inventory/
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+    project_root = os.path.abspath(os.path.join(script_dir, '..'))
 
     # 1. Start with HCloud inventory
     inventory = get_hcloud_inventory(project_root)

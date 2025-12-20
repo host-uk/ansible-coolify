@@ -6,12 +6,12 @@ This project provides a comprehensive Ansible-based automation suite for install
 
 - **Controller**: The main Coolify instance.
 - **Workers**: Remote servers managed by the Coolify controller.
-- **State Store**: A local directory (`ansible/state`) used to persist critical information like API tokens, database dumps, and SSH keys.
+- **State Store**: A local directory (`state`) used to persist critical information like API tokens, database dumps, and SSH keys.
 - **Hierarchical Playbooks**: Playbooks are organized by resource type (application, database, service) and action (create, restore, uninstall).
 
 #### Directory Structure
 
-- `ansible/`
+- ``
     - `inventory/`: Server inventory definitions for production and development.
     - `playbooks/`: Organized by resource type.
         - `coolify/`: Core Coolify operations (install, backup, restore).
@@ -37,7 +37,7 @@ This project provides a comprehensive Ansible-based automation suite for install
     ```
 
 2.  **Configure Inventory**:
-    Edit `ansible/inventory/inventory.yml` with your server details.
+    Edit `inventory/inventory.yml` with your server details.
 
 3.  **Deploy Coolify**:
     ```bash

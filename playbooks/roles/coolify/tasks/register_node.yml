@@ -80,4 +80,5 @@
       when: 
         - not ansible_check_mode
         - servers_list.json is defined
+        - servers_list.json | type_debug == 'list'
         - servers_list.json | selectattr('name', 'equalto', current_node_hostname) | list | length == 0

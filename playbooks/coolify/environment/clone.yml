@@ -33,7 +33,7 @@
     - name: Resolve Project UUID
       ansible.builtin.set_fact:
         # Try to find project by UUID first, then by Name
-        resolved_project: "{{ all_projects.json | selectattr('uuid', 'equalto', project_uuid) | first | default(all_projects.json | selectattr('name', 'equalto', project_uuid) | first | default(none)) }}"
+        resolved_project: "{{ all_projects.json | selectattr('uuid', 'equalto', project_uuid) | first | default(all_projects.json | selectattr('name', 'equalto', project_uuid) | first | default(none)) if (all_projects.json is defined and all_projects.json | type_debug == 'list') else none }}"
 
     - name: Fail if Project not found
       ansible.builtin.fail:
@@ -56,8 +56,8 @@
     - name: Find Source and Target Environments
       ansible.builtin.set_fact:
         # Match by name or UUID
-        source_env: "{{ project_details.json.environments | selectattr('name', 'equalto', source_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', source_env_name) | first | default(none)) }}"
-        target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', target_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', target_env_name) | first | default(none)) }}"
+        source_env: "{{ project_details.json.environments | selectattr('name', 'equalto', source_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', source_env_name) | first | default(none)) if (project_details.json is mapping and project_details.json.environments is defined and project_details.json.environments | type_debug == 'list') else none }}"
+        target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', target_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', target_env_name) | first | default(none)) if (project_details.json is mapping and project_details.json.environments is defined and project_details.json.environments | type_debug == 'list') else none }}"
 
     - name: Set Source Environment Actual Name fact
       ansible.builtin.set_fact:
@@ -105,7 +105,7 @@
 
     - name: Filter Applications for Source Environment
       ansible.builtin.set_fact:
-        source_apps: "{{ all_apps.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
+        source_apps: "{{ all_apps.json | selectattr('environment_id', 'equalto', source_env.id) | list if (all_apps.json is defined and all_apps.json | type_debug == 'list') else [] }}"
 
     - name: Clone Applications
       ansible.builtin.include_tasks: ../../tasks/clone_application.yml
@@ -123,7 +123,7 @@
 
     - name: Filter Services for Source Environment
       ansible.builtin.set_fact:
-        source_services: "{{ all_services.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
+        source_services: "{{ all_services.json | selectattr('environment_id', 'equalto', source_env.id) | list if (all_services.json is defined and all_services.json | type_debug == 'list') else [] }}"
 
     - name: Clone Services
       ansible.builtin.include_tasks: ../../tasks/clone_service.yml
@@ -141,8 +141,7 @@
 
     - name: Filter Databases for Source Environment
       ansible.builtin.set_fact:
-        source_databases: "{{ all_databases.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
-      when: all_databases.json is defined and all_databases.json is iterable
+        source_databases: "{{ all_databases.json | selectattr('environment_id', 'equalto', source_env.id) | list if (all_databases.json is defined and all_databases.json | type_debug == 'list') else [] }}"
 
     - name: Clone Databases
       ansible.builtin.include_tasks: ../../tasks/clone_database.yml

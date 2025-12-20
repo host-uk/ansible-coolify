@@ -122,7 +122,9 @@
   register: backup_keys_list
   when: 
     - "'controller' in group_names"
+    - "'production' not in group_names"
     - not ansible_check_mode
+  ignore_errors: true
 
 - name: Save Coolify public keys to local backup
   ansible.builtin.copy:
@@ -134,6 +136,7 @@
   become: false
   when:
     - "'controller' in group_names"
+    - "'production' not in group_names"
     - not ansible_check_mode
     - backup_keys_list is defined and backup_keys_list.json is defined
     - item.public_key is defined

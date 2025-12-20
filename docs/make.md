@@ -28,12 +28,12 @@ If you are responsible for the health and consistency of the entire platform:
 
 #### 4. For Neural Network Code Assistants
 If you are an AI assistant helping to maintain, extend, or document this platform (see [Full Persona Guide](persona_assistant.md)):
-- **Respect the Hierarchy**: Always adhere to the hierarchical playbook structure in `ansible/playbooks/` and the "State Store" pattern in `ansible/state/`.
+- **Respect the Hierarchy**: Always adhere to the hierarchical playbook structure in `playbooks/` and the "State Store" pattern in `state/`.
 - **Prefer the Makefile**: Use `Makefile` targets for execution to ensure consistent environment variables, inventories, and host limits.
 - **Discover Before Doing**: When exploring a new part of the codebase, read the corresponding `docs/` file and the `get_file_structure` of relevant roles before suggesting changes.
-- **Atomic Operations**: Aim for atomic, well-tested changes. Use `make native-test-syntax` and logic tests (in `ansible/tests/`) to verify your work before completion.
+- **Atomic Operations**: Aim for atomic, well-tested changes. Use `make native-test-syntax` and logic tests (in `tests/`) to verify your work before completion.
 - **Documentation First**: Maintain the "discovery-to-documentation" pipeline. If you learn something new about the system, ensure it is reflected in the markdown files.
-- **Treat State as Sacred**: Be careful with `ansible/state/`. Use the provided backup/restore workflows rather than manual file manipulation to preserve infrastructure integrity.
+- **Treat State as Sacred**: Be careful with `state/`. Use the provided backup/restore workflows rather than manual file manipulation to preserve infrastructure integrity.
 
 ---
 
@@ -68,7 +68,7 @@ cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/cre
 ```
 
 #### Backup
-**Description**: Triggers a full backup of the Coolify instance. This includes a database dump, `.env` file, encryption keys, and SSH keys. The artifacts are fetched to the local `ansible/state` directory and then uploaded (encrypted) to the private HostUK S3 storage.
+**Description**: Triggers a full backup of the Coolify instance. This includes a database dump, `.env` file, encryption keys, and SSH keys. The artifacts are fetched to the local `state` directory and then uploaded (encrypted) to the private HostUK S3 storage.
 
 **Variables**:
 None (uses inventory defaults).
@@ -97,7 +97,7 @@ cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/bac
 ```
 
 #### Restore
-**Description**: Restores a Coolify instance from the local `ansible/state` directory. It uploads the database dump, restores SSH keys, and configures the `APP_KEY` to ensure all existing resources are accessible.
+**Description**: Restores a Coolify instance from the local `state` directory. It uploads the database dump, restores SSH keys, and configures the `APP_KEY` to ensure all existing resources are accessible.
 
 **Variables**:
 None (uses local state files).

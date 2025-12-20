@@ -109,6 +109,7 @@
 
 - name: Setup Private Key
   ansible.builtin.include_tasks: key_setup.yml
+  when: "'production' not in group_names"
 
 - name: Register All Nodes
   ansible.builtin.include_tasks: register_all_nodes.yml

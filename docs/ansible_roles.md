@@ -19,7 +19,7 @@ Purpose: Lifecycle management of the Coolify control plane.
   - **API Setup**: Automatically generates and saves an API token using `php artisan tinker`.
   - **Key Setup**: Retrieves or falls back to an existing SSH private key in Coolify and obtains its public key.
   - **Server Registration**: Registers remote servers discovered via the `server` group.
-  - **Backup**: Dumps the database, fetches `.env`, `APP_KEY`, and SSH keys to the local `ansible/state` directory.
+  - **Backup**: Dumps the database, fetches `.env`, `APP_KEY`, and SSH keys to the local `state` directory.
   - **Restore**: Reconstructs the Coolify instance from local state artifacts.
 
 #### 3. `coolify-application`

@@ -4,12 +4,14 @@ This repository contains Ansible playbooks to set up and harden bare metal serve
 
 ## Project Structure
 
-- `ansible/`: Contains Ansible configuration, inventory, and playbooks.
+- `playbooks/`: Contains Ansible playbooks.
+- `roles/`: Contains Ansible roles.
+- `inventory/`: Contains inventory configuration.
 - `docs/`: Documentation for the setup.
 
 ## Quick Start
 
-1. Update `ansible/inventory/inventory.yml` with your server details (Production and/or Development).
+1. Update `inventory/inventory.yml` with your server details (Production and/or Development).
 2. Ensure your SSH keys are available in `~/.ssh/`.
 3. Use Docker Compose for a consistent environment:
    - Start the container: `make up`

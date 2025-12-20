@@ -1,8 +1,8 @@
 ### Playbook Organization
 
-Playbooks are located in `ansible/playbooks/` and follow a hierarchical structure to improve maintainability and discovery.
+Playbooks are located in `playbooks/` and follow a hierarchical structure to improve maintainability and discovery.
 
-#### Core Coolify Playbooks (`ansible/playbooks/coolify/`)
+#### Core Coolify Playbooks (`playbooks/coolify/`)
 
 - `create.yml`: Performs a fresh installation and initial configuration of a Coolify controller and its workers.
 - `backup.yml`: Triggers a full backup of the Coolify state to the local machine.
@@ -14,19 +14,19 @@ Playbooks are located in `ansible/playbooks/` and follow a hierarchical structur
 
 These playbooks are specialized for managing individual resources via the Coolify API.
 
-- **Applications** (`ansible/playbooks/coolify/application/`)
+- **Applications** (`playbooks/coolify/application/`)
     - `create.yml`: Deploy a new application.
     - `restore.yml`: Restore an application from a known state.
     - `sync.yml`: Synchronize applications between two Coolify controllers (e.g., dev to prod).
     - `uninstall.yml`: Remove an application.
 
-- **Databases** (`ansible/playbooks/coolify/database/`)
+- **Databases** (`playbooks/coolify/database/`)
     - `create.yml`, `restore.yml`, `uninstall.yml`.
 
-- **Services** (`ansible/playbooks/coolify/service/`)
+- **Services** (`playbooks/coolify/service/`)
     - `create.yml`, `restore.yml`, `uninstall.yml`.
 
-- **Environment** (`ansible/playbooks/coolify/environment/`)
+- **Environment** (`playbooks/coolify/environment/`)
     - `clone.yml`: Clones an entire environment (apps, dbs, services) from one project/environment to another.
     - `empty.yml`: Deletes all resources within a specific environment.
 

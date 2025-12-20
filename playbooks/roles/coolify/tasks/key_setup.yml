@@ -1,0 +1,231 @@
+---
+- name: List Private Keys from Coolify
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/security/keys"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+  register: keys_list
+  when: not ansible_check_mode
+  ignore_errors: true
+
+- name: Find existing key UUID by name ({{ coolify_key_name }})
+  ansible.builtin.set_fact:
+    coolify_key_uuid: "{{ (keys_list.json | selectattr('name', 'equalto', coolify_key_name) | first).uuid if (keys_list.json is defined and keys_list.json | type_debug == 'list' and keys_list.json | selectattr('name', 'equalto', coolify_key_name) | list | length > 0) else '' }}"
+    default_key_uuid: "{{ (keys_list.json | selectattr('name', 'equalto', 'default') | first).uuid if (keys_list.json is defined and keys_list.json | type_debug == 'list' and keys_list.json | selectattr('name', 'equalto', 'default') | list | length > 0) else '' }}"
+  when: not ansible_check_mode
+
+- name: Fallback to 'default' key UUID if preferred not found
+  ansible.builtin.set_fact:
+    coolify_key_uuid: "{{ default_key_uuid }}"
+  when: 
+    - not ansible_check_mode
+    - coolify_key_uuid == ""
+    - default_key_uuid != ""
+
+- name: Register Private Key in Coolify if missing
+  block:
+    - name: Try to read local private key
+      ansible.builtin.slurp:
+        src: "{{ (coolify_private_key_path | expanduser) if coolify_private_key_path.startswith('~') else coolify_private_key_path }}"
+      register: local_priv_key
+      delegate_to: localhost
+      become: false
+      when: coolify_private_key_path != ""
+      ignore_errors: true
+
+    - name: Try to read remote private key if local missing (Production fallback)
+      ansible.builtin.slurp:
+        src: "/root/.ssh/id_rsa"
+      register: remote_priv_key
+      when: 
+        - local_priv_key is skipped or local_priv_key.failed or local_priv_key.content is not defined
+        - "'production' in group_names"
+      ignore_errors: true
+
+    - name: Prepare and normalize private key content
+      ansible.builtin.set_fact:
+        coolify_private_key_content: "{{ (local_priv_key.content if (local_priv_key is defined and local_priv_key.content is defined) else (remote_priv_key.content if (remote_priv_key is defined and remote_priv_key.content is defined) else '')) | b64decode | replace('\r', '') | trim ~ '\n' }}"
+      no_log: true
+      when: >
+        (local_priv_key is defined and local_priv_key.content is defined) or
+        (remote_priv_key is defined and remote_priv_key.content is defined)
+
+    - name: Derive Public Key from Private Key (fallback)
+      ansible.builtin.shell: ssh-keygen -y -f -
+      args:
+        stdin: "{{ coolify_private_key_content }}"
+      register: derived_public_key
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: coolify_private_key_content is defined and coolify_private_key_content != ""
+      no_log: true
+
+    - name: Identify key type
+      ansible.builtin.shell: ssh-keygen -l -f -
+      args:
+        stdin: "{{ coolify_private_key_content }}"
+      register: key_info
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: coolify_private_key_content is defined and coolify_private_key_content != ""
+      no_log: true
+
+    - name: Convert OPENSSH key to PEM format if needed
+      block:
+        - name: Create temporary file for key conversion
+          ansible.builtin.tempfile:
+            state: file
+            suffix: _coolify_key
+          register: temp_key_file
+          delegate_to: localhost
+          become: false
+
+        - name: Write temporary key for conversion
+          ansible.builtin.copy:
+            content: "{{ coolify_private_key_content }}"
+            dest: "{{ temp_key_file.path }}"
+            mode: '0600'
+          delegate_to: localhost
+          become: false
+
+        - name: Convert key using ssh-keygen
+          ansible.builtin.command:
+            cmd: "ssh-keygen -p -m PEM -f {{ temp_key_file.path }} -N '' -P ''"
+          delegate_to: localhost
+          become: false
+          register: ssh_keygen_result
+          changed_when: ssh_keygen_result.rc == 0
+          ignore_errors: true
+
+        - name: Read converted key
+          ansible.builtin.slurp:
+            src: "{{ temp_key_file.path }}"
+          register: converted_key_slurp
+          delegate_to: localhost
+          become: false
+          when: ssh_keygen_result.rc == 0
+
+        - name: Update private key content fact if conversion succeeded
+          ansible.builtin.set_fact:
+            coolify_private_key_content: "{{ converted_key_slurp.content | b64decode }}"
+          no_log: true
+          when: 
+            - ssh_keygen_result.rc == 0
+            - converted_key_slurp is defined
+            - converted_key_slurp.content is defined
+      always:
+        - name: Remove temporary key
+          ansible.builtin.file:
+            path: "{{ temp_key_file.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          when: temp_key_file.path is defined
+      when:
+        - coolify_private_key_content is defined
+        - coolify_private_key_content.startswith('-----BEGIN OPENSSH PRIVATE KEY')
+        - "'(RSA)' in key_info.stdout | default('')"
+
+    - name: Post Private Key to Coolify API
+      block:
+        - name: Warn if Ed25519 key is used
+          ansible.builtin.debug:
+            msg: "WARNING: Ed25519 key detected. Coolify might require RSA/PEM format. If this fails, consider using an RSA key."
+          when: "'(ED25519)' in key_info.stdout | default('')"
+
+        - name: Post Private Key
+          ansible.builtin.uri:
+            url: "{{ coolify_api_base_url }}/security/keys"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              name: "{{ coolify_key_name }}"
+              description: "Managed by Ansible"
+              private_key: "{{ coolify_private_key_content }}"
+            status_code: [201]
+          register: create_key_result
+      when: 
+        - coolify_private_key_content is defined
+        - coolify_private_key_content.startswith('-----BEGIN')
+
+    - name: Set key UUID from creation result
+      ansible.builtin.set_fact:
+        coolify_key_uuid: "{{ create_key_result.json.uuid if (create_key_result.json is defined and create_key_result.json is mapping and create_key_result.json.uuid is defined) else coolify_key_uuid }}"
+      when: 
+        - create_key_result is defined
+        - create_key_result.json is defined
+  rescue:
+    - name: Warn about key registration failure
+      ansible.builtin.debug:
+        msg: "WARNING: Failed to register private key '{{ coolify_key_name }}' in Coolify. Server registration might fail if no valid key is available."
+  when: 
+    - not ansible_check_mode
+    - coolify_key_uuid == ""
+    - "'production' not in group_names"
+
+- name: Set Public Key fact from existing keys
+  ansible.builtin.set_fact:
+    coolify_public_key: "{{ (keys_list.json | selectattr('uuid', 'equalto', coolify_key_uuid) | first).public_key if (keys_list.json is defined and keys_list.json | type_debug == 'list' and (keys_list.json | selectattr('uuid', 'equalto', coolify_key_uuid) | list | length > 0)) else '' }}"
+  when: 
+    - not ansible_check_mode
+    - coolify_key_uuid != ""
+
+- name: Re-fetch keys if newly created to get public key
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/security/keys"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+  register: keys_list_after_create
+  when: 
+    - not ansible_check_mode
+    - create_key_result is defined
+    - create_key_result is changed
+    - coolify_public_key == ""
+
+- name: Set Public Key fact after creation
+  ansible.builtin.set_fact:
+    coolify_public_key: "{{ (keys_list_after_create.json | selectattr('uuid', 'equalto', coolify_key_uuid) | first).public_key if (keys_list_after_create.json is defined and keys_list_after_create.json | type_debug == 'list' and (keys_list_after_create.json | selectattr('uuid', 'equalto', coolify_key_uuid) | list | length > 0)) else coolify_public_key }}"
+  when: 
+    - not ansible_check_mode
+    - keys_list_after_create is defined
+    - keys_list_after_create.json is defined
+    - coolify_key_uuid != ""
+
+- name: Ensure coolify_public_key is defined and fallback to derived key
+  ansible.builtin.set_fact:
+    coolify_public_key: "{{ coolify_public_key if coolify_public_key | default('') != '' else (derived_public_key.stdout if (derived_public_key is defined and derived_public_key.rc | default(1) == 0 and derived_public_key.stdout != '') else '') }}"
+
+- name: Save Coolify public key to local state folder
+  ansible.builtin.copy:
+    content: "{{ coolify_public_key }}"
+    dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify/{{ coolify_key_name }}.pub"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when:
+    - not ansible_check_mode
+    - coolify_public_key != ""
+    - coolify_state_path != ""
+
+- name: Debug key info
+  ansible.builtin.debug:
+    msg: "Using Private Key UUID: {{ coolify_key_uuid }} with Public Key: {{ coolify_public_key | default('NOT FOUND') }}"
+
+- name: Add Coolify public key to host authorized_keys
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ coolify_public_key }}"
+  when:
+    - not ansible_check_mode
+    - coolify_public_key != ""
+    - inventory_hostname != 'localhost'

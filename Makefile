@@ -3,7 +3,7 @@ ANSIBLE_IMAGE = ansible-coolify
 DEV_CONTROLLER ?= controller.lan
 PROD_CONTROLLER ?= noc.host.uk.com
 DOCKER_RUN_ARGS = -it --rm \
-	-v $(PWD)/ansible:/ansible \
+	-v $(PWD):/ansible \
 	-v $(HOME)/.ssh:/root/.ssh:ro \
 	$(if $(SSH_AUTH_SOCK),-v $(SSH_AUTH_SOCK):/run/ssh-agent -e SSH_AUTH_SOCK=/run/ssh-agent)
 
@@ -156,22 +156,22 @@ help:
 # --- Native Targets ---
 
 native-build-ansible:
-	cd ansible && docker build -t $(ANSIBLE_IMAGE) .
+	docker build -t $(ANSIBLE_IMAGE) .
 
 native-clean:
 	find . -type f -name "*.retry" -delete
 
 native-docker-lint:
-	$(MAKE) _run-docker CMD="/bin/sh -c 'cd /ansible && ansible-lint playbooks/ roles/'"
+	$(MAKE) _run-docker CMD="/bin/sh -c 'ansible-lint playbooks/ roles/'"
 
 native-docker-test:
-	$(MAKE) _run-docker CMD="/bin/sh -c 'cd /ansible && ansible-playbook tests/test_coolify_token.yml && ansible-playbook tests/test_parallels_vm.yml'"
+	$(MAKE) _run-docker CMD="/bin/sh -c 'ansible-playbook tests/test_coolify_token.yml && ansible-playbook tests/test_parallels_vm.yml'"
 
 native-install-deps:
-	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections
+	ansible-galaxy collection install -r requirements.yml -p ./collections
 
 native-lint:
-	cd ansible && ansible-lint playbooks/ roles/
+	ansible-lint playbooks/ roles/
 
 native-setup:
 	@if command -v brew >/dev/null 2>&1; then \
@@ -203,8 +203,11 @@ native-test-parallels:
 native-test-syntax:
 	$(MAKE) _run-pb PB=tests/test_coolify_roles_syntax.yml FLAGS="--syntax-check"
 
+native-test-token-extraction:
+	$(MAKE) _run-pb PB=tests/test_coolify_token.yml
+
 native-update-deps:
-	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
+	ansible-galaxy collection install -r requirements.yml -p ./collections --force
 
 # --- Docker Compose Targets ---
 
@@ -314,7 +317,7 @@ prod-uninstall-service:
 # Run an ansible playbook
 # Usage: $(MAKE) _run-pb PB=path/to/pb.yml [LIMIT=host_or_group] [VARS="key=val"] [FLAGS="--syntax-check"]
 _run-pb:
-	cd ansible && ansible-playbook -i inventory/ $(if $(LIMIT),-l $(LIMIT)) $(FLAGS) $(PB) $(VARS) $(EXTRA_VARS)
+	ansible-playbook -i inventory/ $(if $(LIMIT),-l $(LIMIT)) $(FLAGS) $(PB) $(VARS) $(EXTRA_VARS)
 
 # Run a command inside the Ansible Docker container
 # Usage: $(MAKE) _run-docker CMD="command"
