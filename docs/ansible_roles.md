@@ -42,3 +42,11 @@ Purpose: Manage Coolify Services (Redis, Meilisearch, etc.).
 #### 6. `parallels_vm` (Legacy/Dev)
 Purpose: Automate the creation and destruction of Parallels Desktop VMs on macOS for development.
 - **Tools**: Uses `prlctl` to manage VM state.
+
+#### 7. `hetzner_infra`
+Purpose: Discovery and base configuration of Hetzner infrastructure.
+- **Key Tasks**:
+  - **API Verification**: Confirms connectivity to HCloud, Robot, and S3 APIs.
+  - **Infrastructure Discovery**: Gathers settings for servers, SSH keys, certificates, load balancers, and storage boxes.
+  - **rDNS Management**: Sets PTR records for Cloud and Robot servers based on `platform`.
+  - **State Persistence**: Saves discovered infrastructure info to the host-specific state store.

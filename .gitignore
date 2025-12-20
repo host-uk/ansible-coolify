@@ -41,4 +41,5 @@ logs
 .ssh/
 dev/
 ansible/state/
+ansible/inventory/inventory.yml
 /.output.txt

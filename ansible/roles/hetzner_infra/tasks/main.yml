@@ -9,6 +9,7 @@
         state: present
       register: cloud_firewall
       delegate_to: localhost
+      when: hetzner_infra_manage_firewall | bool
 
     - name: Apply Cloud Firewall to servers
       hetzner.hcloud.firewall:
@@ -19,7 +20,9 @@
             label_selector: "project=coolify"
         state: present
       delegate_to: localhost
-      when: cloud_firewall is defined
+      when: 
+        - hetzner_infra_manage_firewall | bool
+        - cloud_firewall is defined
 
     - name: Manage Cloud rDNS
       hetzner.hcloud.rdns:
@@ -30,7 +33,7 @@
         state: present
       delegate_to: localhost
       when: 
-        - is_hcloud | default(false)
+        - platform == 'hcloud'
         - ansible_host is defined
   when: hetzner_hcloud_token != ""
 
@@ -45,7 +48,7 @@
         state: present
       delegate_to: localhost
       when: 
-        - is_hrobot | default(false)
+        - platform == 'hrobot'
         - ansible_host is defined
 
     - name: Manage Robot Firewall
@@ -57,9 +60,15 @@
         state: enabled
       delegate_to: localhost
       when: 
-        - is_hrobot | default(false)
+        - platform == 'hrobot'
         - ansible_host is defined
         - hetzner_infra_manage_firewall | bool
   when: 
     - hetzner_robot_user != ""
     - hetzner_robot_password != ""
+
+- name: Verify API Access
+  ansible.builtin.include_tasks: verify_api.yml
+
+- name: Gather Hetzner Infrastructure Information
+  ansible.builtin.include_tasks: gather_info.yml

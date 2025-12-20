@@ -1,0 +1,97 @@
+---
+- name: Ensure Hetzner state directory exists
+  ansible.builtin.file:
+    path: "{{ coolify_state_path }}/{{ inventory_hostname }}/hetzner"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+
+- name: Gather Hetzner Cloud Info
+  block:
+    - name: Gather HCloud Server Info
+      hetzner.hcloud.server_info:
+        api_token: "{{ hetzner_hcloud_token }}"
+        name: "{{ inventory_hostname }}"
+      register: hcloud_server_info
+
+    - name: Gather HCloud SSH Key Info
+      hetzner.hcloud.ssh_key_info:
+        api_token: "{{ hetzner_hcloud_token }}"
+      register: hcloud_ssh_key_info
+
+    - name: Gather HCloud Certificate Info
+      hetzner.hcloud.certificate_info:
+        api_token: "{{ hetzner_hcloud_token }}"
+      register: hcloud_certificate_info
+
+    - name: Gather HCloud Load Balancer Info
+      hetzner.hcloud.load_balancer_info:
+        api_token: "{{ hetzner_hcloud_token }}"
+      register: hcloud_lb_info
+
+    - name: Gather HCloud Datacenter Info
+      hetzner.hcloud.datacenter_info:
+        api_token: "{{ hetzner_hcloud_token }}"
+      register: hcloud_datacenter_info
+
+    - name: Gather HCloud Location Info
+      hetzner.hcloud.location_info:
+        api_token: "{{ hetzner_hcloud_token }}"
+      register: hcloud_location_info
+
+    - name: Save HCloud info to state
+      ansible.builtin.copy:
+        content: "{{ item.value | to_nice_json }}"
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/hetzner/{{ item.key }}.json"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      loop:
+        - { key: 'hcloud_server', value: "{{ hcloud_server_info.hcloud_server_info | default([]) }}" }
+        - { key: 'hcloud_ssh_keys', value: "{{ hcloud_ssh_key_info.hcloud_ssh_key_info | default([]) }}" }
+        - { key: 'hcloud_certificates', value: "{{ hcloud_certificate_info.hcloud_certificate_info | default([]) }}" }
+        - { key: 'hcloud_load_balancers', value: "{{ hcloud_lb_info.hcloud_load_balancer_info | default([]) }}" }
+        - { key: 'hcloud_datacenters', value: "{{ hcloud_datacenter_info.hcloud_datacenter_info | default([]) }}" }
+        - { key: 'hcloud_locations', value: "{{ hcloud_location_info.hcloud_location_info | default([]) }}" }
+  when: 
+    - hetzner_hcloud_token != ""
+    - platform == 'hcloud'
+
+- name: Gather Hetzner Robot Info
+  block:
+    - name: Gather Robot SSH Key Info
+      community.hrobot.ssh_key_info:
+        hetzner_user: "{{ hetzner_robot_user }}"
+        hetzner_password: "{{ hetzner_robot_password }}"
+      register: robot_ssh_key_info
+
+    - name: Gather Robot Server Info
+      community.hrobot.robot_info:
+        hetzner_user: "{{ hetzner_robot_user }}"
+        hetzner_password: "{{ hetzner_robot_password }}"
+      register: robot_info
+      ignore_errors: true
+
+    - name: Gather Robot Storagebox Info
+      community.hrobot.storagebox_info:
+        hetzner_user: "{{ hetzner_robot_user }}"
+        hetzner_password: "{{ hetzner_robot_password }}"
+      register: storagebox_info
+      ignore_errors: true
+
+    - name: Save Robot info to state
+      ansible.builtin.copy:
+        content: "{{ item.value | to_nice_json }}"
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/hetzner/{{ item.key }}.json"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      loop:
+        - { key: 'robot_ssh_keys', value: "{{ robot_ssh_key_info.ssh_keys | default([]) }}" }
+        - { key: 'robot_info', value: "{{ robot_info.robot | default({}) }}" }
+        - { key: 'storageboxes', value: "{{ storagebox_info.storageboxes | default([]) }}" }
+  when: 
+    - hetzner_robot_user != ""
+    - hetzner_robot_password != ""
+    - platform == 'hrobot'

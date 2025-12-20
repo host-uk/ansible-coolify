@@ -1,0 +1,55 @@
+---
+- name: Verify S3 API Access
+  amazon.aws.s3_bucket_info:
+    endpoint_url: "{{ hostuk_s3_endpoint }}"
+    region: "{{ hostuk_s3_region }}"
+    access_key: "{{ hostuk_s3_access_key }}"
+    secret_key: "{{ hostuk_s3_secret_key }}"
+  register: s3_buckets_info
+  delegate_to: localhost
+  become: false
+  when: 
+    - hostuk_s3_enabled | bool
+    - hostuk_s3_access_key != ""
+    - hostuk_s3_secret_key != ""
+
+- name: Debug S3 Buckets
+  ansible.builtin.debug:
+    msg: "Found S3 buckets: {{ s3_buckets_info.buckets | map(attribute='name') | list }}"
+  when: 
+    - hostuk_s3_enabled | bool
+    - s3_buckets_info is defined
+    - s3_buckets_info.buckets is defined
+
+- name: Verify HCloud API Access
+  hetzner.hcloud.server_info:
+    api_token: "{{ hetzner_hcloud_token }}"
+  register: hcloud_servers
+  delegate_to: localhost
+  become: false
+  when: hetzner_hcloud_token != ""
+
+- name: Debug HCloud Servers count
+  ansible.builtin.debug:
+    msg: "Found {{ hcloud_servers.hcloud_server_info | length }} HCloud servers."
+  when: 
+    - hcloud_servers is defined
+    - hcloud_servers.hcloud_server_info is defined
+
+- name: Verify Robot API Access
+  community.hrobot.robot_info:
+    hetzner_user: "{{ hetzner_robot_user }}"
+    hetzner_password: "{{ hetzner_robot_password }}"
+  register: robot_info
+  delegate_to: localhost
+  become: false
+  when: 
+    - hetzner_robot_user != ""
+    - hetzner_robot_password != ""
+
+- name: Debug Robot Servers count
+  ansible.builtin.debug:
+    msg: "Found {{ robot_info.robot_info | length }} Robot servers."
+  when: 
+    - robot_info is defined
+    - robot_info.robot_info is defined

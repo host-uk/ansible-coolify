@@ -50,7 +50,9 @@
   community.general.ufw:
     state: enabled
     policy: allow
-  when: ansible_os_family == 'Debian'
+  when: 
+    - ansible_os_family == 'Debian'
+    - common_manage_ufw | default(false) | bool
 
 
 - name: Allow incoming traffic on specified ports
@@ -61,7 +63,9 @@
     - 22
     - 80
     - 443
-  when: ansible_os_family == 'Debian'
+  when: 
+    - ansible_os_family == 'Debian'
+    - common_manage_ufw | default(false) | bool
 
 - name: Configure Fail2Ban
   ansible.builtin.template:

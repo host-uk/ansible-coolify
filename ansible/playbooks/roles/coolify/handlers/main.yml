@@ -1,0 +1,7 @@
+---
+- name: Restart Coolify containers
+  ansible.builtin.command: "docker compose restart"
+  args:
+    chdir: /data/coolify/source
+  changed_when: true
+  when: ansible_os_family == 'Debian'

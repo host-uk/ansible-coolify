@@ -17,26 +17,26 @@
 
     - name: Encrypt the tarball using the SSH private key
       ansible.builtin.shell: |
-        openssl enc -aes-256-cbc -salt -pbkdf2 -in "/tmp/{{ backup_archive_name }}" -out "/tmp/{{ backup_encrypted_name }}" -pass file:{{ coolify_backup_encryption_key_path | expanduser }}
+        openssl enc -aes-256-cbc -salt -pbkdf2 -in "/tmp/{{ backup_archive_name }}" -out "/tmp/{{ backup_encrypted_name }}" -pass file:{{ hostuk_backup_encryption_key_path | expanduser }}
       delegate_to: localhost
       become: false
       changed_when: true
 
     - name: Upload encrypted backup to Hetzner Object Storage
       amazon.aws.s3_object:
-        endpoint_url: "{{ coolify_s3_endpoint }}"
-        bucket: "{{ coolify_s3_bucket }}"
-        object: "{{ coolify_s3_path }}/{{ inventory_hostname }}/{{ backup_encrypted_name }}"
+        endpoint_url: "{{ hostuk_s3_endpoint }}"
+        bucket: "{{ hostuk_s3_bucket }}"
+        object: "{{ hostuk_s3_path }}/{{ inventory_hostname }}/{{ backup_encrypted_name }}"
         src: "/tmp/{{ backup_encrypted_name }}"
         mode: put
-        region: "{{ coolify_s3_region }}"
-        access_key: "{{ coolify_s3_access_key }}"
-        secret_key: "{{ coolify_s3_secret_key }}"
+        region: "{{ hostuk_s3_region }}"
+        access_key: "{{ hostuk_s3_access_key }}"
+        secret_key: "{{ hostuk_s3_secret_key }}"
       delegate_to: localhost
       become: false
       when: 
-        - coolify_s3_access_key != ""
-        - coolify_s3_secret_key != ""
+        - hostuk_s3_access_key != ""
+        - hostuk_s3_secret_key != ""
 
     - name: Cleanup temporary backup files
       ansible.builtin.file:
@@ -47,4 +47,4 @@
         - "/tmp/{{ backup_encrypted_name }}"
       delegate_to: localhost
       become: false
-  when: coolify_s3_enabled | bool
+  when: hostuk_s3_enabled | bool

@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+
+'''
+HostUK Remote Inventory Script
+Combines Hetzner Cloud dynamic inventory with service metadata (S3, SaaS).
+'''
+
+import json
+import os
+import subprocess
+import sys
+
+def get_hcloud_inventory(project_root):
+    """Fetch inventory using the HCloud plugin via a hidden config file."""
+    # Path to the hidden HCloud inventory config
+    config_path = os.path.join(project_root, 'ansible', 'inventory', '.hcloud.yml')
+    
+    if not os.path.exists(config_path):
+        return {"_meta": {"hostvars": {}}, "all": {"children": ["ungrouped"]}}
+    
+    try:
+        # Run ansible-inventory specifically for the hcloud config
+        # We use -i to point to the file directly to avoid recursion if the directory is searched
+        result = subprocess.run(
+            ["ansible-inventory", "-i", config_path, "--list"],
+            capture_output=True, text=True, check=True,
+            cwd=project_root # Run from project root to ensure lookups in YAML work
+        )
+        return json.loads(result.stdout)
+    except Exception as e:
+        return {
+            "_meta": {"hostvars": {}}, 
+            "all": {"children": ["ungrouped", "error"]}, 
+            "error": {"vars": {"inventory_error": str(e)}}
+        }
+
+def main():
+    # Determine project root (2 levels up from ansible/inventory/)
+    # Current script is in ansible/inventory/
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+
+    # 1. Start with HCloud inventory
+    inventory = get_hcloud_inventory(project_root)
+
+    # 2. Add Remote Services metadata
+    if 'all' not in inventory:
+        inventory['all'] = {'children': []}
+    if 'children' not in inventory['all']:
+        inventory['all']['children'] = []
+    
+    # Add Services group
+    if 'services' not in inventory['all']['children']:
+        inventory['all']['children'].append('services')
+    
+    inventory['services'] = {
+        'hosts': ['hostuk_s3', 'host_uk_s3', 'cdn_endpoint', 'saas_api'],
+        'vars': {
+            'api_access_confirmed': {
+                'hcloud': os.environ.get('HCLOUD_TOKEN') is not None,
+                's3': os.environ.get('HETZNER_S3_ACCESS_KEY') is not None,
+                'robot': (os.environ.get('HETZNER_ROBOT_USER') is not None and 
+                         os.environ.get('HETZNER_ROBOT_PASSWORD') is not None)
+            }
+        }
+    }
+    
+    if '_meta' not in inventory:
+        inventory['_meta'] = {'hostvars': {}}
+    
+    # HostUK Private S3 (Infrastructure Backups)
+    inventory['_meta']['hostvars']['hostuk_s3'] = {
+        'ansible_host': 'fsn1.your-objectstorage.com',
+        'bucket': 'hostuk',
+        'region': 'fsn1',
+        'type': 'private_state_store',
+        'status': 'available' if os.environ.get('HETZNER_S3_ACCESS_KEY') else 'unauthenticated'
+    }
+    
+    # Coolify Public S3 (Application Files)
+    inventory['_meta']['hostvars']['host_uk_s3'] = {
+        'ansible_host': 'fsn1.your-objectstorage.com',
+        'bucket': 'host-uk',
+        'region': 'fsn1',
+        'type': 'public_app_assets',
+        'status': 'available' if os.environ.get('HETZNER_S3_ACCESS_KEY') else 'unauthenticated'
+    }
+
+    # CDN and SaaS placeholders as requested
+    inventory['_meta']['hostvars']['cdn_endpoint'] = {
+        'ansible_host': 'cdn.host.uk.com',
+        'provider': 'hetzner_object_storage',
+        'container': 'host-uk-cdn',
+        'status': 'active'
+    }
+    
+    inventory['_meta']['hostvars']['saas_api'] = {
+        'ansible_host': 'api.host.uk.com',
+        'endpoints': [
+            '/v1/billing',
+            '/v1/provisioning',
+            '/v1/status'
+        ],
+        'auth_status': 'valid' if os.environ.get('SAAS_API_KEY') else 'missing_key'
+    }
+
+    print(json.dumps(inventory, indent=2))
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == '--host':
+        # Return empty vars as we provide them in --list
+        print(json.dumps({}))
+    else:
+        main()

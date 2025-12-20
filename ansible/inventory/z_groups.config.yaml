@@ -1,0 +1,11 @@
+# Constructed inventory to dynamically create groups based on host variables
+plugin: constructed
+strict: false
+keyed_groups:
+  # Create groups from the 'labels' list (e.g., controller, worker, monitoring, etc.)
+  - prefix: ""
+    key: labels
+    separator: ""
+  # Create groups based on the 'platform' variable (e.g., platform_hcloud, platform_hrobot, platform_parallels)
+  - prefix: platform
+    key: platform

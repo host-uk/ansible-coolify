@@ -7,7 +7,9 @@
     - 6001
     - 6002
     - 8000
-  when: ansible_os_family == 'Debian'
+  when: 
+    - ansible_os_family == 'Debian'
+    - common_manage_ufw | default(false) | bool
 
 - name: Check if Coolify is already installed
   ansible.builtin.stat:
@@ -71,6 +73,26 @@
   when: 
     - ansible_os_family == 'Debian'
     - coolify_env_file.stat.exists
+
+- name: Configure Coolify Application S3 Storage in .env
+  ansible.builtin.lineinfile:
+    path: /data/coolify/source/.env
+    regexp: "^{{ item.key }}="
+    line: "{{ item.key }}={{ item.value }}"
+    state: present
+  loop:
+    - { key: 'S3_ENABLED', value: "{{ coolify_s3_app_enabled | string | lower }}" }
+    - { key: 'S3_ENDPOINT', value: "{{ coolify_s3_app_endpoint }}" }
+    - { key: 'S3_REGION', value: "{{ coolify_s3_app_region }}" }
+    - { key: 'S3_BUCKET', value: "{{ coolify_s3_app_bucket }}" }
+    - { key: 'S3_ACCESS_KEY', value: "{{ coolify_s3_app_access_key }}" }
+    - { key: 'S3_SECRET_KEY', value: "{{ coolify_s3_app_secret_key }}" }
+  when: 
+    - ansible_os_family == 'Debian'
+    - coolify_env_file.stat.exists
+    - coolify_s3_app_enabled | bool
+  no_log: true
+  notify: Restart Coolify containers
 
 - name: Setup Coolify API
   ansible.builtin.include_tasks: api_setup.yml

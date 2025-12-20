@@ -4,7 +4,7 @@ hetzner_robot_user: "{{ lookup('env', 'HETZNER_ROBOT_USER') | default('') }}"
 hetzner_robot_password: "{{ lookup('env', 'HETZNER_ROBOT_PASSWORD') | default('') }}"
 
 # Firewall settings
-hetzner_infra_manage_firewall: true
+hetzner_infra_manage_firewall: false
 hetzner_infra_firewall_name: "coolify-firewall"
 
 # Cloud Firewall Rules

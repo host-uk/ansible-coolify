@@ -44,6 +44,14 @@ This project provides a comprehensive Ansible-based automation suite for install
     make dev-deploy
     ```
 
+#### Persona Guides
+
+The project defines clear personas to guide interaction with the platform:
+1.  **Developers**: For those building the platform logic.
+2.  **Product Users**: For managing applications and services.
+3.  **Platform Administrators**: For infrastructure and state management.
+4.  **Neural Network Code Assistants**: Guidelines for AI-driven development and collaboration (see [Persona: Assistant](persona_assistant.md)).
+
 #### Key Features
 
 - **Automated Installation**: Zero-touch installation of Coolify with predefined admin credentials.
@@ -51,3 +59,4 @@ This project provides a comprehensive Ansible-based automation suite for install
 - **State Persistence**: Critical application keys and database backups are fetched locally to ensure recoverability.
 - **Resource Cloning**: Support for cloning environments and applications across different servers or regions.
 - **Worker Registration**: Automatically registers worker nodes into the Coolify controller.
+- **S3 Integration**: Support for both private (infrastructure backup) and public (application storage) buckets on Hetzner Object Storage.

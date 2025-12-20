@@ -17,18 +17,18 @@ This repository contains Ansible playbooks to set up and harden bare metal serve
 
 For more details, see [Quick Start Guide](docs/docs/quick_start.md).
 
-## Systems and Hosts
+## Systems and Hosts (Example)
 
-- **Marketing Website**: https://host.uk.com
-- **Ordering System**: https://order.host.uk.com
+- **Marketing Website**: https://example.com
+- **Ordering System**: https://order.example.com
 - **Controllers**:
-    - `noc.host.uk.com` (Production Controller - Runs Beszel, Sentry.io)
-    - `lab.snider.dev` (Development Controller - Public URL), `dev.host.uk.com` (Endpoint)
+    - `controller.example.com` (Production Controller)
+    - `controller.lan` (Development Controller)
 - **Workers**:
-    - `de.host.uk.com` (App Server - dc14)
-    - `de2.host.uk.com` (App Server - dc13)
-    - `build.de.host.uk.com` (Docker Build Server)
+    - `worker1.example.com` (App Server)
+    - `worker2.example.com` (App Server)
+    - `build.example.com` (Docker Build Server)
 
 ## S3 Storage
-- **Endpoint**: `fsn1.your-objectstorage.com` (Hetzner S3)
+- **Endpoint**: `fsn1.your-objectstorage.com` (S3 Compatible Storage)
 

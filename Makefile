@@ -1,99 +1,68 @@
-.PHONY: help install-deps update-deps setup-native start-agent dev-login prod-login dev-deploy prod-deploy dev-uninstall prod-uninstall dev-reinstall prod-reinstall dev-backup prod-backup dev-restore prod-restore lint test build-ansible clean \
-	dev-docker-deploy prod-docker-deploy docker-test docker-lint \
-	sync-apps dev-test-install-config \
-	dev-create-app prod-create-app dev-restore-app prod-restore-app dev-uninstall-app prod-uninstall-app \
-	dev-create-service prod-create-service dev-restore-service prod-restore-service dev-uninstall-service prod-uninstall-service \
-	dev-create-db prod-create-db dev-restore-db prod-restore-db dev-uninstall-db prod-uninstall-db \
-	dev-clone-env-pb prod-clone-env-pb clone-env dev-clone-env clone-app-de-eu dev-clone-app-de-eu clone-host-uk-lon dev-clone-host-uk-lon \
-	dev-empty-env-pb prod-empty-env-pb empty-env dev-empty-env clear-host-uk-lon dev-clear-host-uk-lon \
-	dev-sync-apps prod-hetzner-setup
-
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
+DEV_CONTROLLER ?= vm-controller.lan
+PROD_CONTROLLER ?= noc.example.com
 DOCKER_RUN_ARGS = -it --rm \
 	-v $(PWD)/ansible/inventory/inventory.yml:/config/inventory.yml \
 	-v $(HOME)/.ssh/id_rsa:/secrets/ssh_key \
 	-v $(HOME)/.ssh/id_rsa.pub:/secrets/ssh_key.pub \
 	-v $(PWD)/ansible:/ansible
 
-# Default target
-help:
-	@echo "Available targets (Native):"
-	@echo "  setup-native       - Install native dependencies (brew/pip) and collections"
-	@echo "  start-agent        - Ensure ssh-agent is running"
-	@echo "  dev-login          - Add development SSH key to ssh-agent"
-	@echo "  prod-login         - Add production SSH key to ssh-agent"
-	@echo "  install-deps       - Install missing Ansible collections"
-	@echo "  update-deps        - Force update all Ansible collections"
-	@echo "  dev-deploy         - Run deployment for dev (native)"
-	@echo "  prod-deploy        - Run deployment for prod (native)"
-	@echo "  dev-backup         - Backup Coolify for dev (native)"
-	@echo "  prod-backup        - Backup Coolify for prod (native)"
-	@echo "  dev-restore        - Restore Coolify for dev (native)"
-	@echo "  prod-restore       - Restore Coolify for prod (native)"
-	@echo "  dev-uninstall      - Uninstall Coolify from dev (native)"
-	@echo "  prod-uninstall     - Uninstall Coolify from prod (native)"
-	@echo "  dev-reinstall      - Full reinstall for dev (Backup -> Uninstall -> Install -> Restore)"
-	@echo "  prod-reinstall     - Full reinstall for prod (Backup -> Uninstall -> Install -> Restore)"
-	@echo "  test               - Run Parallels VM lifecycle test (native)"
-	@echo "  lint               - Run ansible-lint (native)"
-	@echo ""
-	@echo "  sync-apps          - Sync applications from development to production"
-	@echo "  dev-sync-apps      - Sync applications from production to development"
-	@echo ""
-	@echo "Resource Management (dev/prod):"
-	@echo "  {dev,prod}-create-{app,service,db}"
-	@echo "  {dev,prod}-restore-{app,service,db}"
-	@echo "  {dev,prod}-uninstall-{app,service,db}"
-	@echo "  clone-env          - Clone environment (prod by default, requires SOURCE and TARGET)"
-	@echo "  dev-clone-env      - Clone environment in dev (requires SOURCE and TARGET)"
-	@echo "  clone-host-uk-lon  - Specific clone for host.uk.com (de -> lon, prod by default)"
-	@echo "  dev-clone-host-uk-lon - Specific clone for host.uk.com in dev (de -> lon)"
-	@echo "  empty-env          - Empty an environment (delete all resources, prod by default)"
-	@echo "  dev-empty-env      - Empty an environment in dev (delete all resources)"
-	@echo "  clear-host-uk-lon  - Specific clear for host.uk.com (lon, prod by default)"
-	@echo "  dev-clear-host-uk-lon - Specific clear for host.uk.com in dev (lon)"
-	@echo ""
-	@echo "Available targets (Docker):"
-	@echo "  build-ansible      - Build the Ansible Docker image"
-	@echo "  dev-docker-deploy  - Run deployment for dev (docker)"
-	@echo "  prod-docker-deploy - Run deployment for prod (docker)"
-	@echo "  docker-test        - Run Parallels VM lifecycle test (docker)"
-	@echo "  docker-lint        - Run ansible-lint (docker)"
-	@echo ""
-	@echo "Configuration Tests:"
-	@echo "  dev-test-install-config - Test Coolify installation with custom config"
-	@echo ""
-	@echo "General:"
-	@echo "  clean              - Clean up temporary files"
-	@echo ""
-	@echo "Examples:"
-	@echo "  # Deploy to development with custom admin credentials"
-	@echo "  make dev-deploy EXTRA_VARS=\"-e coolify_root_username=admin -e coolify_root_user_email=admin@example.com -e coolify_root_user_password=SecurePassword123!\""
-	@echo ""
-	@echo "  # Run only the parallels_vm setup"
-	@echo "  make dev-deploy EXTRA_VARS=\"--tags parallels_vm\""
-	@echo ""
-	@echo "  # Uninstall Coolify"
-	@echo "  make dev-uninstall"
-	@echo ""
-	@echo "  # Full reinstall (uninstall then deploy)"
-	@echo "  make dev-uninstall && make dev-deploy"
-	@echo ""
-	@echo "  # Automated reinstall with Backup & Restore"
-	@echo "  make dev-reinstall"
+.DEFAULT_GOAL := help
 
-# --- Native Targets ---
+# --- Development Targets ---
 
-setup-native:
-	@if command -v brew >/dev/null 2>&1; then \
-		brew install ansible ansible-lint jq yq; \
-	else \
-		echo "Homebrew not found, skipping brew install"; \
+dev-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/backup.yml LIMIT=development
+
+dev-clear-host-uk-lon:
+	$(MAKE) dev-empty-env ENV=lon.example.com PROJECT=example.com
+
+dev-clone-app-de-eu:
+	$(MAKE) dev-clone-env SOURCE=app1.example.com TARGET=app2.example.com PROJECT=example-project-uuid
+
+dev-clone-env:
+	@if [ -z "$(SOURCE)" ] || [ -z "$(TARGET)" ]; then \
+		echo "Error: SOURCE and TARGET are required."; \
+		echo "Usage: make dev-clone-env SOURCE=<source_env_name> TARGET=<target_env_name> [PROJECT=<project_uuid>]"; \
+		exit 1; \
 	fi
-	pip install --upgrade pip
-	pip install ansible-core distlib netaddr jsonschema ipaddr jmespath
-	$(MAKE) install-deps
+	$(MAKE) dev-clone-env-pb VARS="-e coolify_source_env_name=$(SOURCE) -e coolify_target_env_name=$(TARGET) $(if $(PROJECT),-e coolify_project_uuid=$(PROJECT))"
+
+dev-clone-env-pb:
+	$(MAKE) _run-pb PB=playbooks/coolify/environment/clone.yml LIMIT=development
+
+dev-clone-host-uk-lon:
+	$(MAKE) dev-clone-env SOURCE=worker1.example.com TARGET=worker2.example.com PROJECT=example.com
+
+dev-create-app:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/create.yml LIMIT=development
+
+dev-create-db:
+	$(MAKE) _run-pb PB=playbooks/coolify/database/create.yml LIMIT=development
+
+dev-create-service:
+	$(MAKE) _run-pb PB=playbooks/coolify/service/create.yml LIMIT=development
+
+dev-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=development
+
+dev-docker-deploy:
+	$(MAKE) _run-docker CMD="ansible-playbook -l development playbooks/coolify/create.yml"
+
+dev-empty-env:
+	@if [ -z "$(ENV)" ] || [ -z "$(PROJECT)" ]; then \
+		echo "Error: ENV and PROJECT are required."; \
+		echo "Usage: make dev-empty-env ENV=<env_name> PROJECT=<project_name_or_uuid>"; \
+		exit 1; \
+	fi
+	$(MAKE) dev-empty-env-pb VARS="-e coolify_env_name=$(ENV) -e coolify_project_uuid=$(PROJECT)"
+
+dev-empty-env-pb:
+	$(MAKE) _run-pb PB=playbooks/coolify/environment/empty.yml LIMIT=development
+
+dev-hetzner-setup:
+	$(MAKE) _run-pb PB=playbooks/hetzner_setup.yml LIMIT=development
 
 dev-login:
 	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
@@ -102,14 +71,117 @@ dev-login:
 		ssh-add ~/.ssh/vm-worker; \
 	fi
 
-prod-login:
-	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
-		eval $$(ssh-agent -s) && ssh-add ~/.ssh/hostuk; \
-	else \
-		ssh-add ~/.ssh/hostuk; \
-	fi
+dev-reinstall:
+	$(MAKE) _run-pb PB=playbooks/coolify/reinstall.yml LIMIT=development
 
-start-agent:
+dev-restore:
+	$(MAKE) _run-pb PB=playbooks/coolify/restore.yml LIMIT=development
+
+dev-restore-app:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/restore.yml LIMIT=development
+
+dev-restore-db:
+	$(MAKE) _run-pb PB=playbooks/coolify/database/restore.yml LIMIT=development
+
+dev-restore-service:
+	$(MAKE) _run-pb PB=playbooks/coolify/service/restore.yml LIMIT=development
+
+dev-sync-apps:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/sync.yml \
+		VARS="-e coolify_source_controller=$(PROD_CONTROLLER) -e coolify_target_controller=$(DEV_CONTROLLER)"
+
+dev-test-install-config:
+	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=development \
+		VARS="-e coolify_root_username=test -e coolify_root_user_email=test@host.uk.com -e coolify_root_user_password=Tesn735dfsd! -e coolify_autoupdate=false"
+
+dev-uninstall:
+	$(MAKE) _run-pb PB=playbooks/coolify/uninstall.yml LIMIT=development
+
+dev-uninstall-app:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/uninstall.yml LIMIT=development
+
+dev-uninstall-db:
+	$(MAKE) _run-pb PB=playbooks/coolify/database/uninstall.yml LIMIT=development
+
+dev-uninstall-service:
+	$(MAKE) _run-pb PB=playbooks/coolify/service/uninstall.yml LIMIT=development
+
+# --- General ---
+
+help:
+	@echo "Available targets (Development):"
+	@echo "  dev-backup         - Backup Coolify for dev"
+	@echo "  dev-deploy         - Run deployment for dev"
+	@echo "  dev-hetzner-setup  - Infrastructure discovery for dev"
+	@echo "  dev-login          - Add development SSH key to ssh-agent"
+	@echo "  dev-reinstall      - Full reinstall for dev"
+	@echo "  dev-restore        - Restore Coolify for dev"
+	@echo "  dev-sync-apps      - Sync applications from production to development"
+	@echo "  dev-uninstall      - Uninstall Coolify from dev"
+	@echo ""
+	@echo "Available targets (Native):"
+	@echo "  native-build-ansible - Build the Ansible Docker image"
+	@echo "  native-clean       - Clean up temporary files"
+	@echo "  native-install-deps - Install missing Ansible collections"
+	@echo "  native-lint        - Run ansible-lint"
+	@echo "  native-setup       - Install native dependencies and collections"
+	@echo "  native-start-agent - Ensure ssh-agent is running"
+	@echo "  native-test        - Run all tests"
+	@echo "  native-update-deps - Force update all Ansible collections"
+	@echo ""
+	@echo "Available targets (Production):"
+	@echo "  prod-backup        - Backup Coolify for prod"
+	@echo "  prod-deploy        - Run deployment for prod"
+	@echo "  prod-hetzner-setup - Infrastructure discovery for prod"
+	@echo "  prod-login         - Add production SSH key to ssh-agent"
+	@echo "  prod-reinstall     - Full reinstall for prod"
+	@echo "  prod-restore       - Restore Coolify for prod"
+	@echo "  prod-sync-apps     - Sync applications from development to production"
+	@echo "  prod-uninstall     - Uninstall Coolify from prod"
+	@echo ""
+	@echo "Resource Management ({dev,prod}-*):"
+	@echo "  create-{app,service,db}"
+	@echo "  restore-{app,service,db}"
+	@echo "  uninstall-{app,service,db}"
+	@echo "  clone-env          - Clone environment (requires SOURCE and TARGET)"
+	@echo "  empty-env          - Empty an environment (delete all resources)"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make dev-deploy EXTRA_VARS=\"-e coolify_root_username=admin ...\""
+
+# --- Native Targets ---
+
+native-build-ansible:
+	./ansible/scripts/docker_tag.sh
+	cd ansible && docker build -t $(ANSIBLE_IMAGE) .
+
+native-clean:
+	find . -type f -name "*.retry" -delete
+	rm -f ansible/.env .env
+
+native-docker-lint:
+	$(MAKE) _run-docker CMD="/bin/sh -c 'cd /ansible && ansible-lint playbooks/ roles/'"
+
+native-docker-test:
+	$(MAKE) _run-docker CMD="/bin/sh -c 'cd /ansible && ansible-playbook tests/test_coolify_token.yml && ansible-playbook tests/test_parallels_vm.yml'"
+
+native-install-deps:
+	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections
+
+native-lint:
+	cd ansible && ansible-lint playbooks/ roles/
+
+native-setup:
+	@if command -v brew >/dev/null 2>&1; then \
+		brew install ansible ansible-lint jq yq; \
+	else \
+		echo "Homebrew not found, skipping brew install"; \
+	fi
+	pip install --upgrade pip
+	pip install ansible-core distlib netaddr jsonschema ipaddr jmespath
+	$(MAKE) native-install-deps
+
+native-start-agent:
 	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
 		echo "Starting ssh-agent..."; \
 		ssh-agent -s > ~/.ssh/ssh-agent.env; \
@@ -118,207 +190,133 @@ start-agent:
 		echo "ssh-agent is already running."; \
 	fi
 
-install-deps:
-	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections
+native-test: native-test-syntax native-test-logic native-test-parallels
 
-update-deps:
+native-test-logic:
+	$(MAKE) _run-pb PB=tests/test_coolify_token.yml
+
+native-test-parallels:
+	$(MAKE) _run-pb PB=tests/test_parallels_vm.yml
+
+native-test-syntax:
+	$(MAKE) _run-pb PB=tests/test_coolify_roles_syntax.yml FLAGS="--syntax-check"
+
+native-update-deps:
 	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
 
-dev-deploy:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/create.yml $(EXTRA_VARS)
-
-prod-deploy:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/create.yml $(EXTRA_VARS)
-
-dev-uninstall:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/uninstall.yml $(EXTRA_VARS)
-
-prod-uninstall:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/uninstall.yml $(EXTRA_VARS)
-
-dev-reinstall:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/reinstall.yml $(EXTRA_VARS)
-
-prod-reinstall:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/reinstall.yml $(EXTRA_VARS)
-
-dev-backup:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/backup.yml $(EXTRA_VARS)
+# --- Production Targets ---
 
 prod-backup:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/backup.yml $(EXTRA_VARS)
+	$(MAKE) _run-pb PB=playbooks/coolify/backup.yml LIMIT=production
 
-dev-restore:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/restore.yml $(EXTRA_VARS)
+prod-clear-host-uk-lon:
+	$(MAKE) prod-empty-env ENV=lon.example.com PROJECT=example.com
 
-prod-restore:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/restore.yml $(EXTRA_VARS)
+prod-clone-app-de-eu:
+	$(MAKE) prod-clone-env SOURCE=app1.example.com TARGET=app2.example.com PROJECT=example-project-uuid
 
-sync-apps:
-	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/coolify/application/sync.yml \
-		-e "coolify_source_controller=vm-controller" \
-		-e "coolify_target_controller=noc.host.uk.com" \
-		$(EXTRA_VARS)
+prod-clone-env:
+	@if [ -z "$(SOURCE)" ] || [ -z "$(TARGET)" ]; then \
+		echo "Error: SOURCE and TARGET are required."; \
+		echo "Usage: make prod-clone-env SOURCE=<source_env_name> TARGET=<target_env_name> [PROJECT=<project_uuid>]"; \
+		exit 1; \
+	fi
+	$(MAKE) prod-clone-env-pb VARS="-e coolify_source_env_name=$(SOURCE) -e coolify_target_env_name=$(TARGET) $(if $(PROJECT),-e coolify_project_uuid=$(PROJECT))"
 
-prod-hetzner-setup:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/hetzner_setup.yml $(EXTRA_VARS)
-
-dev-sync-apps:
-	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/coolify/application/sync.yml \
-		-e "coolify_source_controller=noc.host.uk.com" \
-		-e "coolify_target_controller=vm-controller" \
-		$(EXTRA_VARS)
-
-# --- Resource Management ---
-
-dev-create-app:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/application/create.yml $(EXTRA_VARS)
-prod-create-app:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/application/create.yml $(EXTRA_VARS)
-dev-restore-app:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/application/restore.yml $(EXTRA_VARS)
-prod-restore-app:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/application/restore.yml $(EXTRA_VARS)
-dev-uninstall-app:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/application/uninstall.yml $(EXTRA_VARS)
-prod-uninstall-app:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/application/uninstall.yml $(EXTRA_VARS)
-
-dev-create-service:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/service/create.yml $(EXTRA_VARS)
-prod-create-service:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/service/create.yml $(EXTRA_VARS)
-dev-restore-service:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/service/restore.yml $(EXTRA_VARS)
-prod-restore-service:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/service/restore.yml $(EXTRA_VARS)
-dev-uninstall-service:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/service/uninstall.yml $(EXTRA_VARS)
-prod-uninstall-service:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/service/uninstall.yml $(EXTRA_VARS)
-
-dev-create-db:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/database/create.yml $(EXTRA_VARS)
-prod-create-db:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/database/create.yml $(EXTRA_VARS)
-dev-restore-db:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/database/restore.yml $(EXTRA_VARS)
-prod-restore-db:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/database/restore.yml $(EXTRA_VARS)
-dev-uninstall-db:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/database/uninstall.yml $(EXTRA_VARS)
-prod-uninstall-db:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/database/uninstall.yml $(EXTRA_VARS)
-
-dev-clone-env-pb:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/environment/clone.yml $(EXTRA_VARS)
 prod-clone-env-pb:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/environment/clone.yml $(EXTRA_VARS)
+	$(MAKE) _run-pb PB=playbooks/coolify/environment/clone.yml LIMIT=production
 
-# Helper for dev cloning
-dev-clone-env:
-	@if [ -z "$(SOURCE)" ] || [ -z "$(TARGET)" ]; then \
-		echo "Error: SOURCE and TARGET are required."; \
-		echo "Usage: make dev-clone-env SOURCE=<source_env_name> TARGET=<target_env_name> [PROJECT=<project_uuid>]"; \
-		exit 1; \
-	fi
-	$(MAKE) dev-clone-env-pb EXTRA_VARS="-e coolify_source_env_name=$(SOURCE) -e coolify_target_env_name=$(TARGET) $(if $(PROJECT),-e coolify_project_uuid=$(PROJECT))"
+prod-clone-host-uk-lon:
+	$(MAKE) prod-clone-env SOURCE=worker1.example.com TARGET=worker2.example.com PROJECT=example.com
 
-# Example: make clone-env SOURCE=app-de-eu-1.host.uk.com TARGET=app-de-eu-2.host.uk.com
-clone-env:
-	@if [ -z "$(SOURCE)" ] || [ -z "$(TARGET)" ]; then \
-		echo "Error: SOURCE and TARGET are required."; \
-		echo "Usage: make clone-env SOURCE=<source_env_name> TARGET=<target_env_name> [PROJECT=<project_uuid>]"; \
-		exit 1; \
-	fi
-	$(MAKE) prod-clone-env-pb EXTRA_VARS="-e coolify_source_env_name=$(SOURCE) -e coolify_target_env_name=$(TARGET) $(if $(PROJECT),-e coolify_project_uuid=$(PROJECT))"
+prod-create-app:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/create.yml LIMIT=production
 
-# Specific example for app-de-eu
-clone-app-de-eu:
-	$(MAKE) clone-env SOURCE=app-de-eu-1.host.uk.com TARGET=app-de-eu-2.host.uk.com PROJECT=eo0swss44080ssggkwgwocwg
+prod-create-db:
+	$(MAKE) _run-pb PB=playbooks/coolify/database/create.yml LIMIT=production
 
-dev-clone-app-de-eu:
-	$(MAKE) dev-clone-env SOURCE=app-de-eu-1.host.uk.com TARGET=app-de-eu-2.host.uk.com PROJECT=eo0swss44080ssggkwgwocwg
+prod-create-service:
+	$(MAKE) _run-pb PB=playbooks/coolify/service/create.yml LIMIT=production
 
-# Clone for host.uk.com project: de -> lon
-clone-host-uk-lon:
-	$(MAKE) clone-env SOURCE=de.host.uk.com TARGET=lon.host.uk.com PROJECT=host.uk.com
-
-dev-clone-host-uk-lon:
-	$(MAKE) dev-clone-env SOURCE=de.host.uk.com TARGET=lon.host.uk.com PROJECT=host.uk.com
-
-dev-empty-env-pb:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/environment/empty.yml $(EXTRA_VARS)
-prod-empty-env-pb:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/coolify/environment/empty.yml $(EXTRA_VARS)
-
-empty-env:
-	@if [ -z "$(ENV)" ] || [ -z "$(PROJECT)" ]; then \
-		echo "Error: ENV and PROJECT are required."; \
-		echo "Usage: make empty-env ENV=<env_name> PROJECT=<project_name_or_uuid>"; \
-		exit 1; \
-	fi
-	$(MAKE) prod-empty-env-pb EXTRA_VARS="-e coolify_env_name=$(ENV) -e coolify_project_uuid=$(PROJECT)"
-
-dev-empty-env:
-	@if [ -z "$(ENV)" ] || [ -z "$(PROJECT)" ]; then \
-		echo "Error: ENV and PROJECT are required."; \
-		echo "Usage: make dev-empty-env ENV=<env_name> PROJECT=<project_name_or_uuid>"; \
-		exit 1; \
-	fi
-	$(MAKE) dev-empty-env-pb EXTRA_VARS="-e coolify_env_name=$(ENV) -e coolify_project_uuid=$(PROJECT)"
-
-clear-host-uk-lon:
-	$(MAKE) empty-env ENV=lon.host.uk.com PROJECT=host.uk.com
-
-dev-clear-host-uk-lon:
-	$(MAKE) dev-empty-env ENV=lon.host.uk.com PROJECT=host.uk.com
-
-lint:
-	cd ansible && ansible-lint playbooks/ roles/
-
-test: test-syntax test-logic test-parallels
-
-test-syntax:
-	cd ansible && ansible-playbook --syntax-check tests/test_coolify_roles_syntax.yml
-
-test-logic:
-	cd ansible && ansible-playbook tests/test_coolify_token.yml
-
-test-parallels:
-	cd ansible && ansible-playbook -i inventory/inventory.yml tests/test_parallels_vm.yml $(EXTRA_VARS)
-
-# --- Configuration Tests ---
-
-dev-test-install-config:
-	cd ansible && ansible-playbook -i inventory/inventory.yml -l development playbooks/coolify/create.yml \
-		-e "coolify_root_username=test" \
-		-e "coolify_root_user_email=test@host.uk.com" \
-		-e "coolify_root_user_password=Tesn735dfsd!" \
-		-e "coolify_autoupdate=false" \
-		$(EXTRA_VARS)
-
-
-# --- Docker Targets ---
-
-build-ansible:
-	./ansible/scripts/docker_tag.sh
-	cd ansible && docker build -t $(ANSIBLE_IMAGE) .
-
-dev-docker-deploy:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l development playbooks/coolify/create.yml
+prod-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=production
 
 prod-docker-deploy:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) ansible-playbook -l production playbooks/coolify/create.yml
+	$(MAKE) _run-docker CMD="ansible-playbook -l production playbooks/coolify/create.yml"
 
-docker-test:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) /bin/sh -c "cd /ansible && ansible-playbook tests/test_coolify_token.yml && ansible-playbook tests/test_parallels_vm.yml"
+prod-empty-env:
+	@if [ -z "$(ENV)" ] || [ -z "$(PROJECT)" ]; then \
+		echo "Error: ENV and PROJECT are required."; \
+		echo "Usage: make prod-empty-env ENV=<env_name> PROJECT=<project_name_or_uuid>"; \
+		exit 1; \
+	fi
+	$(MAKE) prod-empty-env-pb VARS="-e coolify_env_name=$(ENV) -e coolify_project_uuid=$(PROJECT)"
 
-docker-lint:
-	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) /bin/sh -c "cd /ansible && ansible-lint playbooks/ roles/"
+prod-empty-env-pb:
+	$(MAKE) _run-pb PB=playbooks/coolify/environment/empty.yml LIMIT=production
 
-# --- General ---
+prod-hetzner-setup:
+	$(MAKE) _run-pb PB=playbooks/hetzner_setup.yml LIMIT=production
 
-clean:
-	find . -type f -name "*.retry" -delete
-	rm -f ansible/.env .env
+prod-login:
+	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
+		eval $$(ssh-agent -s) && ssh-add ~/.ssh/hostuk; \
+	else \
+		ssh-add ~/.ssh/hostuk; \
+	fi
+
+prod-reinstall:
+	$(MAKE) _run-pb PB=playbooks/coolify/reinstall.yml LIMIT=production
+
+prod-restore:
+	$(MAKE) _run-pb PB=playbooks/coolify/restore.yml LIMIT=production
+
+prod-restore-app:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/restore.yml LIMIT=production
+
+prod-restore-db:
+	$(MAKE) _run-pb PB=playbooks/coolify/database/restore.yml LIMIT=production
+
+prod-restore-service:
+	$(MAKE) _run-pb PB=playbooks/coolify/service/restore.yml LIMIT=production
+
+prod-sync-apps:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/sync.yml \
+		VARS="-e coolify_source_controller=$(DEV_CONTROLLER) -e coolify_target_controller=$(PROD_CONTROLLER)"
+
+prod-uninstall:
+	$(MAKE) _run-pb PB=playbooks/coolify/uninstall.yml LIMIT=production
+
+prod-uninstall-app:
+	$(MAKE) _run-pb PB=playbooks/coolify/application/uninstall.yml LIMIT=production
+
+prod-uninstall-db:
+	$(MAKE) _run-pb PB=playbooks/coolify/database/uninstall.yml LIMIT=production
+
+prod-uninstall-service:
+	$(MAKE) _run-pb PB=playbooks/coolify/service/uninstall.yml LIMIT=production
+
+# --- Utilities (Internal) ---
+
+# Run an ansible playbook
+# Usage: $(MAKE) _run-pb PB=path/to/pb.yml [LIMIT=host_or_group] [VARS="key=val"] [FLAGS="--syntax-check"]
+_run-pb:
+	cd ansible && ansible-playbook -i inventory/ $(if $(LIMIT),-l $(LIMIT)) $(FLAGS) $(PB) $(VARS) $(EXTRA_VARS)
+
+# Run a command inside the Ansible Docker container
+# Usage: $(MAKE) _run-docker CMD="command"
+_run-docker:
+	docker run $(DOCKER_RUN_ARGS) $(ANSIBLE_IMAGE) $(CMD)
+
+.PHONY: dev-backup dev-clear-host-uk-lon dev-clone-app-de-eu dev-clone-env dev-clone-env-pb dev-clone-host-uk-lon \
+	dev-create-app dev-create-db dev-create-service dev-deploy dev-docker-deploy dev-empty-env dev-empty-env-pb \
+	dev-hetzner-setup dev-login dev-reinstall dev-restore dev-restore-app dev-restore-db dev-restore-service \
+	dev-sync-apps dev-test-install-config dev-uninstall dev-uninstall-app dev-uninstall-db dev-uninstall-service \
+	help \
+	native-build-ansible native-clean native-docker-lint native-docker-test native-install-deps native-lint \
+	native-setup native-start-agent native-test native-test-logic native-test-parallels native-test-syntax native-update-deps \
+	prod-backup prod-clear-host-uk-lon prod-clone-app-de-eu prod-clone-env prod-clone-env-pb prod-clone-host-uk-lon \
+	prod-create-app prod-create-db prod-create-service prod-deploy prod-docker-deploy prod-empty-env prod-empty-env-pb \
+	prod-hetzner-setup prod-login prod-reinstall prod-restore prod-restore-app prod-restore-db prod-restore-service \
+	prod-sync-apps prod-uninstall prod-uninstall-app prod-uninstall-db prod-uninstall-service \
+	_run-pb _run-docker
