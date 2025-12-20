@@ -1,0 +1,34 @@
+---
+- name: Create test_server
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    server_type: "{{ hcloud_server_type_name }}"
+    image: "{{ hcloud_image_name }}"
+    location: "{{ hcloud_location_name }}"
+    state: created
+  register: test_server
+
+- name: Create test_load_balancer
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    load_balancer_type: lb11
+    network_zone: "{{ hcloud_network_zone_name }}"
+    labels:
+      key: value
+  register: test_load_balancer
+
+- name: Create test_load_balancer_target
+  hetzner.hcloud.load_balancer_target:
+    type: "server"
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    server: "{{ hcloud_server_name }}"
+    state: present
+  register: test_load_balancer_target
+
+- name: Create test_load_balancer_service
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    protocol: "http"
+    listen_port: 80
+    state: present
+  register: test_load_balancer_service

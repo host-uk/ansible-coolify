@@ -1,0 +1,76 @@
+---
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+exclude: ^plugins/module_utils/vendor/hcloud/.*$
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: destroyed-symlinks
+
+      - id: check-json
+      - id: check-yaml
+      - id: check-toml
+
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: \.(md|ya?ml)$
+        exclude: ^changelogs/(dev-changelog\.md|changelog\.yaml)$
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.21.2
+    hooks:
+      - id: pyupgrade
+        args: [--py310-plus]
+
+  - repo: https://github.com/pycqa/isort
+    rev: 7.0.0
+    hooks:
+      - id: isort
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 25.12.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/ansible-community/antsibull-changelog
+    rev: 0.34.0
+    hooks:
+      - id: antsibull-changelog-lint
+      - id: antsibull-changelog-lint-changelog-yaml
+        args: [--strict]
+
+  - repo: local
+    hooks:
+      - id: shfmt
+        name: shfmt
+        description: Format shell scripts with shfmt
+        language: golang
+        additional_dependencies: [mvdan.cc/sh/v3/cmd/shfmt@v3.7.0]
+        entry: shfmt -i 2 -ci -sr -kp -w
+        types: [shell]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: local
+    hooks:
+      - id: check-integration-test-files
+        name: check integration test files
+        description: Ensure the integration test files are in sync
+        language: system
+        entry: scripts/integration-test-files.sh
+        pass_filenames: false
+        files: ^(scripts/integration-test-files.sh$|tests/integration)

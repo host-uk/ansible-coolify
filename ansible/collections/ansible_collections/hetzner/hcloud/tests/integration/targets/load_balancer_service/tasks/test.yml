@@ -1,0 +1,174 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters # noqa: args[module]
+  hetzner.hcloud.load_balancer_service:
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "missing required arguments: listen_port, load_balancer"'
+
+- name: Test create with checkmode
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 80
+    protocol: http
+    state: present
+  check_mode: true
+  register: result
+- name: Verify create with checkmode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 80
+    destination_port: 80
+    protocol: tcp
+    state: present
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer_service.load_balancer == hcloud_load_balancer_name
+      - result.hcloud_load_balancer_service.protocol == "tcp"
+      - result.hcloud_load_balancer_service.listen_port == 80
+      - result.hcloud_load_balancer_service.destination_port == 80
+      - result.hcloud_load_balancer_service.proxyprotocol is false
+      - result.hcloud_load_balancer_service.health_check.protocol == "tcp"
+      - result.hcloud_load_balancer_service.health_check.port == 80
+      - result.hcloud_load_balancer_service.health_check.interval == 15
+      - result.hcloud_load_balancer_service.health_check.retries == 3
+      - result.hcloud_load_balancer_service.health_check.timeout == 10
+      - result.hcloud_load_balancer_service.http == None
+
+- name: Test create idempotency
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 80
+    destination_port: 80
+    protocol: tcp
+    state: present
+  register: result
+- name: Verify create idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test create with not existing load_balancer
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: not-existing
+    listen_port: 80
+    protocol: http
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify create with not existing load_balancer
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "resource (load_balancer) does not exist: not-existing"'
+
+- name: Test create with not existing certificate
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 443
+    destination_port: 80
+    protocol: https
+    http:
+      redirect_http: true
+      certificates:
+        - not-existing
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify create with not existing certificate
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "resource (certificate) does not exist: not-existing"'
+
+- name: Test update
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 80
+    protocol: http
+    state: present
+  register: result
+- name: Verify update
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer_service.load_balancer == hcloud_load_balancer_name
+      - result.hcloud_load_balancer_service.protocol == "http"
+      - result.hcloud_load_balancer_service.listen_port == 80
+      - result.hcloud_load_balancer_service.destination_port == 80
+      - result.hcloud_load_balancer_service.proxyprotocol is false
+      - result.hcloud_load_balancer_service.health_check.protocol == "tcp"
+      - result.hcloud_load_balancer_service.health_check.port == 80
+      - result.hcloud_load_balancer_service.health_check.interval == 15
+      - result.hcloud_load_balancer_service.health_check.retries == 3
+      - result.hcloud_load_balancer_service.health_check.timeout == 10
+      - result.hcloud_load_balancer_service.http != None
+
+- name: Test delete
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 80
+    state: absent
+  register: result
+- name: Verify delete
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with http
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    protocol: http
+    listen_port: 80
+    http:
+      cookie_name: keks
+      sticky_sessions: true
+    state: present
+  register: result
+- name: Verify create with http
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer_service.load_balancer == hcloud_load_balancer_name
+      - result.hcloud_load_balancer_service.listen_port == 80
+      - result.hcloud_load_balancer_service.destination_port == 80
+      - result.hcloud_load_balancer_service.protocol == "http"
+      - result.hcloud_load_balancer_service.proxyprotocol is false
+      - result.hcloud_load_balancer_service.http.certificates == []
+      - result.hcloud_load_balancer_service.http.cookie_name == "keks"
+      - result.hcloud_load_balancer_service.http.cookie_lifetime == 300
+      - result.hcloud_load_balancer_service.http.redirect_http == false
+      - result.hcloud_load_balancer_service.http.sticky_sessions == true
+      - result.hcloud_load_balancer_service.health_check.protocol == "http"
+      - result.hcloud_load_balancer_service.health_check.port == 80
+      - result.hcloud_load_balancer_service.health_check.interval == 15
+      - result.hcloud_load_balancer_service.health_check.retries == 3
+      - result.hcloud_load_balancer_service.health_check.timeout == 10
+      - result.hcloud_load_balancer_service.health_check.http.domain == ""
+      - result.hcloud_load_balancer_service.health_check.http.path == "/"
+      - result.hcloud_load_balancer_service.health_check.http.status_codes | sort == ["2??", "3??"]
+
+- name: Test delete with http
+  hetzner.hcloud.load_balancer_service:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    listen_port: 80
+    state: absent
+  register: result
+- name: Verify delete with http
+  ansible.builtin.assert:
+    that:
+      - result is changed

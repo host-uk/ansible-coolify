@@ -1,0 +1,185 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "missing required arguments: ip_range"'
+
+- name: Test create with check mode
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/16"
+    labels:
+      key: value
+  check_mode: true
+  register: result
+- name: Verify create with check mode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/16"
+    labels:
+      key: value
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_network.name == hcloud_network_name
+      - result.hcloud_network.ip_range == "10.0.0.0/16"
+      - result.hcloud_network.labels.key == "value"
+      - result.hcloud_network.expose_routes_to_vswitch == false
+      - result.hcloud_network.delete_protection == false
+
+- name: Test create idempotency
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/16"
+    labels:
+      key: value
+  register: result
+- name: Verify create idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test update
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/8"
+    labels:
+      key: changed
+      foo: bar
+    expose_routes_to_vswitch: true
+    delete_protection: true
+  register: result
+- name: Verify update
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_network.ip_range == "10.0.0.0/8"
+      - result.hcloud_network.labels.key == "changed"
+      - result.hcloud_network.labels.foo == "bar"
+      - result.hcloud_network.expose_routes_to_vswitch == true
+      - result.hcloud_network.delete_protection == true
+
+- name: Test update idempotency
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/8"
+    labels:
+      key: changed
+      foo: bar
+    delete_protection: true
+  register: result
+- name: Verify update idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete with delete protection
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    state: absent
+  ignore_errors: true
+  register: result
+- name: Verify delete with delete protection
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - result.failure.code == "protected"
+
+- name: Test update delete protection
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    delete_protection: false
+  register: result
+- name: Verify update delete protection
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_network.delete_protection == false
+
+- name: Test update name
+  hetzner.hcloud.network:
+    id: "{{ result.hcloud_network.id }}"
+    name: "changed-{{ hcloud_network_name }}"
+  register: result
+- name: Verify update name
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_network.name == "changed-" + hcloud_network_name
+
+- name: Test update name and labels
+  hetzner.hcloud.network:
+    id: "{{ result.hcloud_network.id }}"
+    name: "{{ hcloud_network_name }}"
+    labels:
+      key: value
+  register: result
+- name: Verify update name and labels
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_network.name == hcloud_network_name
+      - result.hcloud_network.labels.key == "value"
+      - result.hcloud_network.labels.foo is not defined
+
+- name: Test delete
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    state: absent
+  register: result
+- name: Verify delete
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with vSwitch
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/16"
+    expose_routes_to_vswitch: true
+  register: result
+- name: Verify create with vSwitch
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_network.name == hcloud_network_name
+      - result.hcloud_network.ip_range == "10.0.0.0/16"
+      - result.hcloud_network.expose_routes_to_vswitch == true
+      - result.hcloud_network.delete_protection == false
+
+- name: Test create with vSwitch idempotency
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    ip_range: "10.0.0.0/16"
+    expose_routes_to_vswitch: true
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete with vSwitch
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}"
+    state: absent
+  register: result
+- name: Verify delete with vSwitch
+  ansible.builtin.assert:
+    that:
+      - result is changed

@@ -1,0 +1,50 @@
+---
+- name: S3 Remote Backup
+  block:
+    - name: Set backup facts
+      ansible.builtin.set_fact:
+        local_host_state_dir: "{{ coolify_state_path }}/{{ inventory_hostname }}"
+        backup_archive_name: "coolify-state-{{ inventory_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+        backup_encrypted_name: "coolify-state-{{ inventory_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.tar.gz.enc"
+
+    - name: Create tarball of state directory
+      community.general.archive:
+        path: "{{ local_host_state_dir }}"
+        dest: "/tmp/{{ backup_archive_name }}"
+        format: gz
+      delegate_to: localhost
+      become: false
+
+    - name: Encrypt the tarball using the SSH private key
+      ansible.builtin.shell: |
+        openssl enc -aes-256-cbc -salt -pbkdf2 -in "/tmp/{{ backup_archive_name }}" -out "/tmp/{{ backup_encrypted_name }}" -pass file:{{ coolify_backup_encryption_key_path | expanduser }}
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Upload encrypted backup to Hetzner Object Storage
+      amazon.aws.s3_object:
+        endpoint_url: "{{ coolify_s3_endpoint }}"
+        bucket: "{{ coolify_s3_bucket }}"
+        object: "{{ coolify_s3_path }}/{{ inventory_hostname }}/{{ backup_encrypted_name }}"
+        src: "/tmp/{{ backup_encrypted_name }}"
+        mode: put
+        region: "{{ coolify_s3_region }}"
+        access_key: "{{ coolify_s3_access_key }}"
+        secret_key: "{{ coolify_s3_secret_key }}"
+      delegate_to: localhost
+      become: false
+      when: 
+        - coolify_s3_access_key != ""
+        - coolify_s3_secret_key != ""
+
+    - name: Cleanup temporary backup files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/{{ backup_archive_name }}"
+        - "/tmp/{{ backup_encrypted_name }}"
+      delegate_to: localhost
+      become: false
+  when: coolify_s3_enabled | bool

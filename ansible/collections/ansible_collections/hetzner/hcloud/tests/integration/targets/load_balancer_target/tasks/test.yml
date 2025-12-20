@@ -1,0 +1,174 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters # noqa: args[module]
+  hetzner.hcloud.load_balancer_target:
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "missing required arguments: load_balancer, type"'
+
+- name: Test create with not existing load_balancer
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: not-existing
+    type: server
+    server: "{{ hcloud_server_name }}"
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify create with not existing load_balancer
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "resource (load_balancer) does not exist: not-existing"'
+
+- name: Test create with not existing server
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: server
+    server: not-existing
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify create with not existing server
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "resource (server) does not exist: not-existing"'
+
+- name: Test create with checkmode
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: server
+    server: "{{ hcloud_server_name }}"
+    state: present
+  check_mode: true
+  register: result
+- name: Verify create with checkmode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with server
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: server
+    server: "{{ hcloud_server_name }}"
+    state: present
+  register: result
+- name: Verify create with server
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer_target.load_balancer == hcloud_load_balancer_name
+      - result.hcloud_load_balancer_target.type == "server"
+      - result.hcloud_load_balancer_target.server == hcloud_server_name
+      - result.hcloud_load_balancer_target.use_private_ip == false
+
+- name: Test create with server idempotency
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: server
+    server: "{{ hcloud_server_name }}"
+    state: present
+  register: result
+- name: Verify create with server idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete with server
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: server
+    server: "{{ hcloud_server_name }}"
+    state: absent
+  register: result
+- name: Verify delete with server
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with label_selector
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: label_selector
+    label_selector: application=backend
+    state: present
+  register: result
+- name: Verify create with label_selector
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer_target.load_balancer == hcloud_load_balancer_name
+      - result.hcloud_load_balancer_target.type == "label_selector"
+      - result.hcloud_load_balancer_target.label_selector == "application=backend"
+      - result.hcloud_load_balancer_target.use_private_ip == false
+
+- name: Test create with label_selector idempotency
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: label_selector
+    label_selector: application=backend
+    state: present
+  register: result
+- name: Verify create with label_selector idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete with label_selector
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: label_selector
+    label_selector: application=backend
+    state: absent
+  register: result
+- name: Verify delete with label_selector
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with ip
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: ip
+    ip: "{{ hetzner_server_ip }}"
+    state: present
+  register: result
+- name: Verify create with ip
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer_target.load_balancer == hcloud_load_balancer_name
+      - result.hcloud_load_balancer_target.type == "ip"
+      - result.hcloud_load_balancer_target.ip == hetzner_server_ip
+      - result.hcloud_load_balancer_target.use_private_ip == none
+
+- name: Test create with ip idempotency
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: ip
+    ip: "{{ hetzner_server_ip }}"
+    state: present
+  register: result
+- name: Verify create with ip idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete with ip
+  hetzner.hcloud.load_balancer_target:
+    load_balancer: "{{ hcloud_load_balancer_name }}"
+    type: ip
+    ip: "{{ hetzner_server_ip }}"
+    state: absent
+  register: result
+- name: Verify delete with ip
+  ansible.builtin.assert:
+    that:
+      - result is changed

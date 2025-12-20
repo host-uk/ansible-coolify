@@ -1,0 +1,231 @@
+# Copyright: (c) 2020, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters # noqa: args[module]
+  hetzner.hcloud.firewall:
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "one of the following is required: id, name"'
+
+- name: Save allowed ssh sources
+  ansible.builtin.set_fact:
+    allowed_ssh_source_ips:
+      - "201.10.10.0/24" # ipv4 network
+      - "201.11.11.2/32" # ipv4 host
+      - "2a02:1234:10:0100::/64" # ipv6 network (non canonical representation)
+      - "2a02:1234:11:10::1/128" # ipv6 host
+
+- name: Test create with check mode
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    rules:
+      - description: allow icmp in
+        direction: in
+        protocol: icmp
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow ssh in
+        direction: in
+        protocol: tcp
+        port: 22
+        source_ips: "{{ allowed_ssh_source_ips }}"
+    labels:
+      key: value
+  check_mode: true
+  register: result
+- name: Verify create with check mode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    rules:
+      - description: allow icmp in
+        direction: in
+        protocol: icmp
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow ssh in
+        direction: in
+        protocol: tcp
+        port: 22
+        source_ips: "{{ allowed_ssh_source_ips }}"
+    labels:
+      key: value
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_firewall.name == hcloud_firewall_name
+      - result.hcloud_firewall.rules | list | count == 2
+      - result.hcloud_firewall.rules[0].description == "allow icmp in"
+      - result.hcloud_firewall.rules[0].direction == "in"
+      - result.hcloud_firewall.rules[0].protocol == "icmp"
+      - result.hcloud_firewall.rules[0].source_ips | count == 2
+      - result.hcloud_firewall.rules[0].source_ips[0] == "0.0.0.0/0"
+      - result.hcloud_firewall.rules[0].source_ips[1] == "::/0"
+      - result.hcloud_firewall.rules[1].description == "allow ssh in"
+      - result.hcloud_firewall.rules[1].direction == "in"
+      - result.hcloud_firewall.rules[1].protocol == "tcp"
+      - result.hcloud_firewall.rules[1].port == "22"
+      - result.hcloud_firewall.rules[1].source_ips | count == 4
+      - result.hcloud_firewall.rules[1].source_ips[0] == "201.10.10.0/24"
+      - result.hcloud_firewall.rules[1].source_ips[1] == "201.11.11.2/32"
+      - result.hcloud_firewall.rules[1].source_ips[2] == "2a02:1234:10:100::/64" # canonical representation
+      - result.hcloud_firewall.rules[1].source_ips[3] == "2a02:1234:11:10::1/128"
+      - result.hcloud_firewall.labels.key == "value"
+      - result.hcloud_firewall.applied_to | list | count == 0
+
+- name: Test create idempotency
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    rules:
+      - description: allow icmp in
+        direction: in
+        protocol: icmp
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow ssh in
+        direction: in
+        protocol: tcp
+        port: 22
+        source_ips: "{{ allowed_ssh_source_ips }}"
+    labels:
+      key: value
+  register: result
+- name: Verify create idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Assign firewall to test_server
+  hetzner.hcloud.firewall_resource:
+    firewall: "{{ hcloud_firewall_name }}"
+    servers: ["{{ test_server.hcloud_server.name }}"]
+    state: present
+
+- name: Test update
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    rules:
+      - description: allow icmp in
+        direction: in
+        protocol: icmp
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow http in
+        direction: in
+        protocol: tcp
+        port: 80
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow http out
+        direction: out
+        protocol: tcp
+        port: 80
+        destination_ips: ["0.0.0.0/0", "::/0"]
+    labels:
+      key: value
+      label: label
+  register: result
+- name: Verify update
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_firewall.name == hcloud_firewall_name
+      - result.hcloud_firewall.rules | list | count == 3
+      - result.hcloud_firewall.rules[0].description == "allow icmp in"
+      - result.hcloud_firewall.rules[0].direction == "in"
+      - result.hcloud_firewall.rules[0].protocol == "icmp"
+      - result.hcloud_firewall.rules[0].source_ips == ["0.0.0.0/0", "::/0"]
+      - result.hcloud_firewall.rules[1].description == "allow http in"
+      - result.hcloud_firewall.rules[1].direction == "in"
+      - result.hcloud_firewall.rules[1].protocol == "tcp"
+      - result.hcloud_firewall.rules[1].port == "80"
+      - result.hcloud_firewall.rules[1].source_ips == ["0.0.0.0/0", "::/0"]
+      - result.hcloud_firewall.rules[2].description == "allow http out"
+      - result.hcloud_firewall.rules[2].direction == "out"
+      - result.hcloud_firewall.rules[2].protocol == "tcp"
+      - result.hcloud_firewall.rules[2].port == "80"
+      - result.hcloud_firewall.rules[2].destination_ips == ["0.0.0.0/0", "::/0"]
+      - result.hcloud_firewall.labels.key == "value"
+      - result.hcloud_firewall.labels.label == "label"
+
+- name: Test update idempotency
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    rules:
+      - description: allow icmp in
+        direction: in
+        protocol: icmp
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow http in
+        direction: in
+        protocol: tcp
+        port: 80
+        source_ips: ["0.0.0.0/0", "::/0"]
+      - description: allow http out
+        direction: out
+        protocol: tcp
+        port: 80
+        destination_ips: ["0.0.0.0/0", "::/0"]
+    labels:
+      key: value
+      label: label
+  register: result
+- name: Verify update idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test update name
+  hetzner.hcloud.firewall:
+    id: "{{ result.hcloud_firewall.id }}"
+    name: "changed-{{ hcloud_firewall_name }}"
+  register: result
+- name: Verify update name
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_firewall.name == "changed-" + hcloud_firewall_name
+
+- name: Test update name and labels
+  hetzner.hcloud.firewall:
+    id: "{{ result.hcloud_firewall.id }}"
+    name: "{{ hcloud_firewall_name }}"
+    labels:
+      key: value
+  register: result
+- name: Verify update name and labels
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_firewall.name == hcloud_firewall_name
+      - result.hcloud_firewall.labels.key == "value"
+      - result.hcloud_firewall.labels.label is not defined
+
+- name: Test delete
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    state: absent
+  ignore_errors: true
+  register: result
+- name: Verify delete
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - result.failure.code == "resource_in_use"
+
+- name: Test delete with force
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    force: true
+    state: absent
+  register: result
+- name: Verify delete with force
+  ansible.builtin.assert:
+    that:
+      - result is changed

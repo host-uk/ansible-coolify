@@ -1,0 +1,86 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Gather hcloud_load_balancer_info
+  hetzner.hcloud.load_balancer_info:
+  register: result
+- name: Verify hcloud_load_balancer_info
+  ansible.builtin.assert:
+    that:
+      - result.hcloud_load_balancer_info | list | count >= 1
+
+- name: Gather hcloud_load_balancer_info in check mode
+  hetzner.hcloud.load_balancer_info:
+  check_mode: true
+  register: result
+- name: Verify hcloud_load_balancer_info in check mode
+  ansible.builtin.assert:
+    that:
+      - result.hcloud_load_balancer_info | list | count >= 1
+
+- name: Gather hcloud_load_balancer_info with correct id
+  hetzner.hcloud.load_balancer_info:
+    id: "{{ test_load_balancer.hcloud_load_balancer.id }}"
+  register: result
+- name: Verify hcloud_load_balancer_info with correct id
+  ansible.builtin.assert:
+    that:
+      - result.hcloud_load_balancer_info | list | count == 1
+      - result.hcloud_load_balancer_info[0].targets | list | count == 1
+      - result.hcloud_load_balancer_info[0].targets | selectattr('type', 'equalto', 'server') | list | count == 1
+      - result.hcloud_load_balancer_info[0].targets | selectattr('server', 'equalto', hcloud_server_name) | list | count == 1
+      - result.hcloud_load_balancer_info[0].targets[0].health_status[0].listen_port == 80
+      - result.hcloud_load_balancer_info[0].targets[0].health_status[0].status in ['healthy', 'unhealthy', 'unknown']
+      - result.hcloud_load_balancer_info[0].services | list | count == 1
+      - result.hcloud_load_balancer_info[0].services | selectattr('protocol', 'equalto', 'http') | list | count == 1
+      - result.hcloud_load_balancer_info[0].services | selectattr('listen_port', 'equalto', 80) | list | count == 1
+      - result.hcloud_load_balancer_info[0].services | selectattr('destination_port', 'equalto', 80) | list | count == 1
+
+- name: Gather hcloud_load_balancer_info with wrong id
+  hetzner.hcloud.load_balancer_info:
+    id: "{{ test_load_balancer.hcloud_load_balancer.id }}4321"
+  ignore_errors: true
+  register: result
+- name: Verify hcloud_load_balancer_info with wrong id
+  ansible.builtin.assert:
+    that:
+      - result is failed
+
+- name: Gather hcloud_load_balancer_info with correct name
+  hetzner.hcloud.load_balancer_info:
+    name: "{{ hcloud_load_balancer_name }}"
+  register: result
+- name: Verify hcloud_load_balancer_info with correct name
+  ansible.builtin.assert:
+    that:
+      - result.hcloud_load_balancer_info | list | count == 1
+
+- name: Gather hcloud_load_balancer_info with wrong name
+  hetzner.hcloud.load_balancer_info:
+    name: "{{ hcloud_load_balancer_name }}-invalid"
+  register: result
+- name: Verify hcloud_load_balancer_info with wrong name
+  ansible.builtin.assert:
+    that:
+      - result.hcloud_load_balancer_info | list | count == 0
+
+- name: Gather hcloud_load_balancer_info with correct label selector
+  hetzner.hcloud.load_balancer_info:
+    label_selector: "key=value"
+  register: result
+- name: Verify hcloud_load_balancer_info with correct label selector
+  ansible.builtin.assert:
+    that:
+      - >
+        result.hcloud_load_balancer_info
+        | selectattr('name', 'equalto', hcloud_load_balancer_name)
+        | list | count == 1
+
+- name: Gather hcloud_load_balancer_info with wrong label selector
+  hetzner.hcloud.load_balancer_info:
+    label_selector: "key!=value"
+  register: result
+- name: Verify hcloud_load_balancer_info with wrong label selector
+  ansible.builtin.assert:
+    that:
+      - result.hcloud_load_balancer_info | list | count == 0

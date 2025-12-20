@@ -1,0 +1,184 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters
+  hetzner.hcloud.primary_ip:
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "one of the following is required: id, name"'
+
+- name: Test create with check mode
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    datacenter: "{{ hcloud_datacenter_name }}"
+    labels:
+      key: value
+  check_mode: true
+  register: result
+- name: Verify create with check mode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    datacenter: "{{ hcloud_datacenter_name }}"
+    labels:
+      key: value
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_primary_ip.name == hcloud_primary_ip_name
+      - result.hcloud_primary_ip.type == "ipv6"
+      - result.hcloud_primary_ip.datacenter == hcloud_datacenter_name
+      - result.hcloud_primary_ip.assignee_type == "server"
+      - result.hcloud_primary_ip.assignee_id is none
+      - result.hcloud_primary_ip.labels.key == "value"
+      - result.hcloud_primary_ip.auto_delete is false
+      - result.hcloud_primary_ip.delete_protection is false
+
+- name: Test create idempotency
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    datacenter: "{{ hcloud_datacenter_name }}"
+    labels:
+      key: value
+  register: result
+- name: Verify create idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test update
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    datacenter: "{{ hcloud_datacenter_name }}"
+    labels:
+      key: value
+      foo: bar
+    auto_delete: true
+  register: result
+- name: Verify update
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_primary_ip.name == hcloud_primary_ip_name
+      - result.hcloud_primary_ip.type == "ipv6"
+      - result.hcloud_primary_ip.datacenter == hcloud_datacenter_name
+      - result.hcloud_primary_ip.assignee_type == "server"
+      - result.hcloud_primary_ip.assignee_id is none
+      - result.hcloud_primary_ip.labels.key == "value"
+      - result.hcloud_primary_ip.labels.foo == "bar"
+      - result.hcloud_primary_ip.delete_protection is false
+      - result.hcloud_primary_ip.auto_delete is true
+
+- name: Test update idempotency
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    datacenter: "{{ hcloud_datacenter_name }}"
+    labels:
+      key: value
+      foo: bar
+    auto_delete: true
+  register: result
+- name: Verify update idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test update delete protection
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    delete_protection: true
+  register: result
+- name: Verify update delete protection
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_primary_ip.delete_protection is true
+
+- name: Test delete with delete protection
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    state: absent
+  ignore_errors: true
+  register: result
+- name: Verify delete with delete protection
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - result.failure.code == "protected"
+
+- name: Test update delete protection
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    delete_protection: false
+  register: result
+- name: Verify update delete protection
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_primary_ip.delete_protection is false
+
+- name: Test delete
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    state: absent
+  register: result
+- name: Verify delete
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with server
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    server: "{{ hcloud_server_name }}"
+  register: result
+- name: Verify create with server
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_primary_ip.name == hcloud_primary_ip_name
+      - result.hcloud_primary_ip.type == "ipv6"
+      - result.hcloud_primary_ip.assignee_id == test_server.hcloud_server.id
+      - result.hcloud_primary_ip.assignee_type == "server"
+
+- name: Test create with server idempotency
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    type: ipv6
+    server: "{{ hcloud_server_name }}"
+  register: result
+- name: Verify create with server idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete with server
+  hetzner.hcloud.primary_ip:
+    name: "{{ hcloud_primary_ip_name }}"
+    state: absent
+  register: result
+- name: Verify delete with server
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Workaround to prevent a timeout during the server deletion
+  ansible.builtin.pause:
+    seconds: 2

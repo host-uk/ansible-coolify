@@ -11,3 +11,6 @@ collections:
   - name: ansible.utils
     version: ">=5.1.0"
   - name: samdoran.macos
+  - name: community.hrobot
+  - name: hetzner.hcloud
+  - name: amazon.aws

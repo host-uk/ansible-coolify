@@ -1,0 +1,104 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters # noqa: args[module]
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "missing required arguments: ip_range, network_zone, type"'
+
+- name: Test create with checkmode
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    ip_range: 10.0.0.0/24
+    state: present
+  check_mode: true
+  register: result
+- name: Verify create with checkmode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    ip_range: 10.0.0.0/24
+    state: present
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_subnetwork.network == hcloud_network_name
+      - result.hcloud_subnetwork.network_zone == hcloud_network_zone_name
+      - result.hcloud_subnetwork.type == "cloud"
+      - result.hcloud_subnetwork.ip_range == "10.0.0.0/24"
+
+- name: Test create idempotency
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    ip_range: 10.0.0.0/24
+    state: present
+  register: result
+- name: Verify create idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test delete
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    ip_range: 10.0.0.0/24
+    state: absent
+  register: result
+- name: Verify delete
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create with vswitch
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: vswitch
+    ip_range: 10.0.1.0/24
+    vswitch_id: "{{ test_vswitch_id }}"
+    state: present
+  register: result
+- name: Verify create with vswitch
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_subnetwork.network == hcloud_network_name
+      - result.hcloud_subnetwork.network_zone == hcloud_network_zone_name
+      - result.hcloud_subnetwork.type == "vswitch"
+      - result.hcloud_subnetwork.ip_range == "10.0.1.0/24"
+      # Type casting can be removed once ansible-core < 2.19 is dropped
+      - result.hcloud_subnetwork.vswitch_id == test_vswitch_id | int
+
+- name: Test delete with vswitch
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}"
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: vswitch
+    ip_range: 10.0.1.0/24
+    state: absent
+  register: subnet
+- name: Verify delete with vswitch
+  ansible.builtin.assert:
+    that:
+      - result is changed

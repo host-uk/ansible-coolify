@@ -1,0 +1,175 @@
+# Copyright: (c) 2022, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: setup network 1 to be absent
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}-1"
+    state: absent
+
+- name: setup network 2 to be absent
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}-2"
+    state: absent
+
+- name: setup server to be absent
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    state: absent
+
+- name: setup create network
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}-1"
+    ip_range: 192.168.0.0/23
+  register: primaryNetwork
+
+- name: setup create network subnet 1
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}-1"
+    ip_range: 192.168.0.0/24
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    state: present
+
+- name: setup create network subnet 2
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}-1"
+    ip_range: 192.168.1.0/24
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    state: present
+
+- name: setup create secondary network
+  hetzner.hcloud.network:
+    name: "{{ hcloud_network_name }}-2"
+    ip_range: 192.168.2.0/23
+  register: secondaryNetwork
+
+- name: setup create secondary network subnet 1
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}-2"
+    ip_range: 192.168.2.0/24
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    state: present
+
+- name: setup create secondary network subnet 2
+  hetzner.hcloud.subnetwork:
+    network: "{{ hcloud_network_name }}-2"
+    ip_range: 192.168.3.0/24
+    network_zone: "{{ hcloud_network_zone_name }}"
+    type: cloud
+    state: present
+
+- name: test create server with primary network and no internet
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    server_type: "{{ hcloud_server_type_name }}"
+    datacenter: "{{ hcloud_datacenter_name }}"
+    image: "{{ hcloud_image_name }}"
+    enable_ipv4: false
+    enable_ipv6: false
+    private_networks:
+      - "{{ primaryNetwork.hcloud_network.name }}"
+    ssh_keys:
+      - "{{ hcloud_ssh_key_name }}"
+    state: created
+  register: result
+- name: verify test create server with primary network
+  assert:
+    that:
+      - result is changed
+
+- name: test update server by adding secondary network
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    server_type: "{{ hcloud_server_type_name }}"
+    datacenter: "{{ hcloud_datacenter_name }}"
+    image: "{{ hcloud_image_name }}"
+    enable_ipv4: false
+    enable_ipv6: false
+    private_networks:
+      - "{{ primaryNetwork.hcloud_network.name }}"
+      - "{{ secondaryNetwork.hcloud_network.id }}"
+    ssh_keys:
+      - "{{ hcloud_ssh_key_name }}"
+    state: created
+  register: result
+- name: verify test update server by adding secondary network
+  assert:
+    that:
+      - result is changed
+
+- name: test update server idem
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    server_type: "{{ hcloud_server_type_name }}"
+    datacenter: "{{ hcloud_datacenter_name }}"
+    image: "{{ hcloud_image_name }}"
+    enable_ipv4: false
+    enable_ipv6: false
+    private_networks:
+      - "{{ primaryNetwork.hcloud_network.name }}"
+      - "{{ secondaryNetwork.hcloud_network.id }}"
+    ssh_keys:
+      - "{{ hcloud_ssh_key_name }}"
+    state: created
+  register: result
+- name: verify test update server idem
+  assert:
+    that:
+      - result is not changed
+
+- name: test server can now be started
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    server_type: "{{ hcloud_server_type_name }}"
+    datacenter: "{{ hcloud_datacenter_name }}"
+    image: "{{ hcloud_image_name }}"
+    enable_ipv4: false
+    enable_ipv6: false
+    private_networks:
+      - "{{ primaryNetwork.hcloud_network.name }}"
+      - "{{ secondaryNetwork.hcloud_network.id }}"
+    ssh_keys:
+      - "{{ hcloud_ssh_key_name }}"
+    state: started
+  register: result
+- name: verify test server can now be started
+  assert:
+    that:
+      - result is changed
+
+- name: test update server idem
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    server_type: "{{ hcloud_server_type_name }}"
+    datacenter: "{{ hcloud_datacenter_name }}"
+    image: "{{ hcloud_image_name }}"
+    enable_ipv4: false
+    enable_ipv6: false
+    private_networks:
+      - "{{ primaryNetwork.hcloud_network.name }}"
+      - "{{ secondaryNetwork.hcloud_network.id }}"
+    ssh_keys:
+      - "{{ hcloud_ssh_key_name }}"
+    state: created
+  register: result
+- name: verify test update server idem
+  assert:
+    that:
+      - result is not changed
+
+- name: cleanup server
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    state: absent
+- name: cleanup networks
+  hetzner.hcloud.network:
+    name: "{{ item }}"
+    state: absent
+  with_items:
+    - "{{ primaryNetwork.hcloud_network.name }}"
+    - "{{ secondaryNetwork.hcloud_network.id }}"
+  until: result is not failed
+  retries: 5
+  delay: 2

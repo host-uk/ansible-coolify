@@ -1,0 +1,15 @@
+---
+- name: Cleanup test_firewall
+  hetzner.hcloud.firewall:
+    name: "{{ hcloud_firewall_name }}"
+    state: absent
+    force: true
+
+- name: Workaround to prevent a timeout during the server deletion
+  ansible.builtin.pause:
+    seconds: 2
+
+- name: Cleanup test_server
+  hetzner.hcloud.server:
+    name: "{{ hcloud_server_name }}"
+    state: absent

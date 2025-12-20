@@ -1,0 +1,5 @@
+---
+collections:
+  - ansible.utils
+  - community.crypto
+  - community.general

@@ -6,7 +6,7 @@
 	dev-create-db prod-create-db dev-restore-db prod-restore-db dev-uninstall-db prod-uninstall-db \
 	dev-clone-env-pb prod-clone-env-pb clone-env dev-clone-env clone-app-de-eu dev-clone-app-de-eu clone-host-uk-lon dev-clone-host-uk-lon \
 	dev-empty-env-pb prod-empty-env-pb empty-env dev-empty-env clear-host-uk-lon dev-clear-host-uk-lon \
-	dev-sync-apps
+	dev-sync-apps prod-hetzner-setup
 
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
@@ -159,6 +159,9 @@ sync-apps:
 		-e "coolify_source_controller=vm-controller" \
 		-e "coolify_target_controller=noc.host.uk.com" \
 		$(EXTRA_VARS)
+
+prod-hetzner-setup:
+	cd ansible && ansible-playbook -i inventory/inventory.yml -l production playbooks/hetzner_setup.yml $(EXTRA_VARS)
 
 dev-sync-apps:
 	cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/coolify/application/sync.yml \

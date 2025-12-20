@@ -1,0 +1,5 @@
+# Hetzner Cloud Inventory
+plugin: hetzner.hcloud.hcloud
+token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+# Only include servers with certain labels if needed
+# label_selector: "project=coolify"

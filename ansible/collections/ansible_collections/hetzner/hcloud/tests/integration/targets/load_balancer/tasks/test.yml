@@ -1,0 +1,145 @@
+# Copyright: (c) 2020, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+- name: Test missing required parameters
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    state: present
+  ignore_errors: true
+  register: result
+- name: Verify missing required parameters
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - 'result.msg == "missing required arguments: load_balancer_type"'
+
+- name: Test create with check mode
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    load_balancer_type: lb11
+    network_zone: "{{ hcloud_network_zone_name }}"
+    state: present
+  check_mode: true
+  register: result
+- name: Verify create with check mode
+  ansible.builtin.assert:
+    that:
+      - result is changed
+
+- name: Test create
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    load_balancer_type: lb11
+    network_zone: "{{ hcloud_network_zone_name }}"
+    labels:
+      key: value
+      label: value123
+    state: present
+  register: result
+- name: Verify create
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer.name == hcloud_load_balancer_name
+      - result.hcloud_load_balancer.load_balancer_type == "lb11"
+      - result.hcloud_load_balancer.algorithm == "round_robin"
+      - result.hcloud_load_balancer.labels.key == "value"
+      - result.hcloud_load_balancer.labels.label == "value123"
+      - result.hcloud_load_balancer.delete_protection == false
+
+- name: Test create idempotency
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    load_balancer_type: lb11
+    network_zone: "{{ hcloud_network_zone_name }}"
+    state: present
+  register: result
+- name: Verify create idempotency
+  ansible.builtin.assert:
+    that:
+      - result is not changed
+
+- name: Test update algorithm
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    algorithm: least_connections
+    state: present
+  register: result
+- name: Verify update algorithm
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer.algorithm == "least_connections"
+
+- name: Test update load_balancer_type
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    load_balancer_type: lb21
+    state: present
+  register: result
+- name: Verify update load_balancer_type
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer.load_balancer_type == "lb21"
+
+- name: Test update labels
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    labels:
+      key: changed
+      label: changed123
+    state: present
+  register: result
+- name: Verify update load_balancer_type
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer.labels.key == "changed"
+      - result.hcloud_load_balancer.labels.label == "changed123"
+
+- name: Test update delete_protection
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    delete_protection: true
+    state: present
+  register: result
+- name: Verify update load_balancer_type
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer.delete_protection == true
+
+- name: Test delete with protection
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    state: absent
+  register: result
+  ignore_errors: true
+- name: Verify delete with protection
+  ansible.builtin.assert:
+    that:
+      - result is failed
+      - result.failure.code == "protected"
+
+- name: Test update delete_protection
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    delete_protection: false
+    state: present
+  register: result
+- name: Verify update delete_protection
+  ansible.builtin.assert:
+    that:
+      - result is changed
+      - result.hcloud_load_balancer.delete_protection == false
+
+- name: Test delete
+  hetzner.hcloud.load_balancer:
+    name: "{{ hcloud_load_balancer_name }}"
+    state: absent
+  register: result
+- name: Verify delete
+  ansible.builtin.assert:
+    that:
+      - result is changed

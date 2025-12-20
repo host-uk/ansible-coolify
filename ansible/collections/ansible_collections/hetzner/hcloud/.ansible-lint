@@ -1,0 +1,20 @@
+---
+exclude_paths:
+  - .azure-pipelines
+  - .cache/
+  - .git/
+  - .github/
+  - changelogs/
+  - examples/
+  - tests/integration/targets/certificate
+  - tests/integration/targets/floating_ip
+  - tests/integration/targets/placement_group
+  - tests/integration/targets/primary_ip
+  - tests/integration/targets/route
+  - tests/integration/targets/server
+  - tests/integration/targets/ssh_key
+  - tests/integration/targets/volume
+
+warn_list:
+  - internal-error
+  - sanity[cannot-ignore]

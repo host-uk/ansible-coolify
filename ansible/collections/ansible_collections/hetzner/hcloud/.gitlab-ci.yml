@@ -1,0 +1,9 @@
+include:
+  - project: cloud/integrations/ci
+    file:
+      - default.yml
+      - pre-commit.yml
+      - workflows/feature-branches.yml
+
+pre-commit:
+  extends: [.pre-commit]

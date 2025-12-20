@@ -10,7 +10,7 @@ This directory is host-specific and is ignored by git to protect secrets and lar
 ansible/state/
 └── <inventory_hostname>/
     ├── .ssh/
-    │   └── ssh_host_*.pub     # Public host keys retrieved from the baremetal host (/etc/ssh)
+    │   └── ssh_host_*         # Public and private host keys retrieved from the baremetal host (/etc/ssh and /root/.ssh)
     └── backups/
         └── coolify/
             ├── .env           # Coolify controller environment file
@@ -29,4 +29,19 @@ ansible/state/
 #### Backup and Restore Workflow
 
 1.  **Backup**: Run `make dev-backup`. This triggers a series of `ansible.builtin.fetch` tasks that pull state from the remote host to `ansible/state`.
-2.  **Restore**: Run `make dev-restore`. This pushes the local state back to a fresh instance and runs the installation script to "heal" the environment.
+2.  **S3 Remote Backup**: After the local backup is complete, the state directory is compressed, encrypted using the `hostuk` SSH key, and uploaded to Hetzner Object Storage for disaster recovery.
+3.  **Restore**: Run `make dev-restore`. This pushes the local state back to a fresh instance and runs the installation script to "heal" the environment.
+
+#### S3 Backup Configuration
+
+The S3 backup is configured via the following variables in `ansible/playbooks/roles/coolify/defaults/main.yml`:
+
+- `coolify_s3_enabled`: Enable/disable S3 backup.
+- `coolify_s3_endpoint`: S3-compatible endpoint (e.g., `https://fsn1.your-objectstorage.com`).
+- `coolify_s3_bucket`: Destination bucket.
+- `coolify_s3_path`: Base path within the bucket.
+- `coolify_backup_encryption_key_path`: Path to the SSH key used for encryption.
+
+Credentials should be provided via environment variables:
+- `HETZNER_S3_ACCESS_KEY`
+- `HETZNER_S3_SECRET_KEY`

@@ -1,0 +1,65 @@
+---
+- name: Hetzner Cloud Management
+  block:
+    - name: Ensure Cloud Firewall exists
+      hetzner.hcloud.firewall:
+        api_token: "{{ hetzner_hcloud_token }}"
+        name: "{{ hetzner_infra_firewall_name }}"
+        rules: "{{ hetzner_infra_cloud_firewall_rules }}"
+        state: present
+      register: cloud_firewall
+      delegate_to: localhost
+
+    - name: Apply Cloud Firewall to servers
+      hetzner.hcloud.firewall:
+        api_token: "{{ hetzner_hcloud_token }}"
+        name: "{{ hetzner_infra_firewall_name }}"
+        apply_to:
+          - type: label_selector
+            label_selector: "project=coolify"
+        state: present
+      delegate_to: localhost
+      when: cloud_firewall is defined
+
+    - name: Manage Cloud rDNS
+      hetzner.hcloud.rdns:
+        api_token: "{{ hetzner_hcloud_token }}"
+        server: "{{ inventory_hostname }}"
+        ip_address: "{{ ansible_host }}"
+        dns_ptr: "{{ inventory_hostname }}"
+        state: present
+      delegate_to: localhost
+      when: 
+        - is_hcloud | default(false)
+        - ansible_host is defined
+  when: hetzner_hcloud_token != ""
+
+- name: Hetzner Robot Management
+  block:
+    - name: Manage Robot rDNS
+      community.hrobot.rdns:
+        hetzner_user: "{{ hetzner_robot_user }}"
+        hetzner_password: "{{ hetzner_robot_password }}"
+        ip: "{{ ansible_host }}"
+        ptr: "{{ inventory_hostname }}"
+        state: present
+      delegate_to: localhost
+      when: 
+        - is_hrobot | default(false)
+        - ansible_host is defined
+
+    - name: Manage Robot Firewall
+      community.hrobot.firewall:
+        hetzner_user: "{{ hetzner_robot_user }}"
+        hetzner_password: "{{ hetzner_robot_password }}"
+        server_ip: "{{ ansible_host }}"
+        rules: "{{ hetzner_infra_robot_firewall_rules }}"
+        state: enabled
+      delegate_to: localhost
+      when: 
+        - is_hrobot | default(false)
+        - ansible_host is defined
+        - hetzner_infra_manage_firewall | bool
+  when: 
+    - hetzner_robot_user != ""
+    - hetzner_robot_password != ""

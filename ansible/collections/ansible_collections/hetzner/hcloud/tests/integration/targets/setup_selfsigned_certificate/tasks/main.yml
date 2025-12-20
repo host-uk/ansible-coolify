@@ -1,0 +1,35 @@
+---
+- name: Create temporary file for test_certificate
+  ansible.builtin.tempfile:
+    suffix: "{{ hcloud_certificate_name }}"
+  register: _tmp_certificate_file
+
+- name: Create certificate privatekey file
+  community.crypto.openssl_privatekey:
+    path: "{{ _tmp_certificate_file.path }}.key"
+    return_content: true
+  register: _certificate_privatekey_file
+
+- name: Create certificate signing request file
+  community.crypto.openssl_csr:
+    privatekey_path: "{{ _tmp_certificate_file.path }}.key"
+    path: "{{ _tmp_certificate_file.path }}.csr"
+    country_name: DE
+    locality_name: Bavaria
+    state_or_province_name: Munich
+    organization_name: Dis
+    common_name: www.example.com
+
+- name: Create certificate file
+  community.crypto.x509_certificate:
+    privatekey_path: "{{ _tmp_certificate_file.path }}.key"
+    csr_path: "{{ _tmp_certificate_file.path }}.csr"
+    path: "{{ _tmp_certificate_file.path }}.crt"
+    provider: selfsigned
+    return_content: true
+  register: _certificate_file
+
+- name: Save certificate files content
+  ansible.builtin.set_fact:
+    test_certificate_privatekey_content: "{{ _certificate_privatekey_file.privatekey }}"
+    test_certificate_content: "{{ _certificate_file.certificate }}"

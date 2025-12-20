@@ -139,24 +139,26 @@
     - item.public_key is defined
     - item.public_key != ""
 
-- name: Find public keys in /root/.ssh and /etc/ssh
+- name: Find baremetal SSH keys (public and private)
   ansible.builtin.find:
     paths: 
       - /root/.ssh
       - /etc/ssh
-    patterns: "*.pub"
-  register: baremetal_pub_keys
+    patterns: 
+      - "ssh_host_*"
+      - "id_*"
+  register: baremetal_keys
   when: "'controller' in group_names"
 
-- name: Fetch baremetal public keys
+- name: Fetch baremetal SSH keys
   ansible.builtin.fetch:
     src: "{{ item.path }}"
     dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/.ssh/"
     flat: true
-  loop: "{{ baremetal_pub_keys.files | default([]) }}"
+  loop: "{{ baremetal_keys.files | default([]) }}"
   when: 
     - "'controller' in group_names"
-    - baremetal_pub_keys is defined and baremetal_pub_keys.matched > 0
+    - baremetal_keys is defined and baremetal_keys.matched > 0
 
 - name: Remove temporary files on remote
   ansible.builtin.file:
@@ -165,3 +167,7 @@
   loop:
     - /tmp/coolify_db.dump
     - /tmp/coolify_ssh_keys.tar.gz
+
+- name: Perform S3 Remote Backup
+  ansible.builtin.include_tasks: s3_backup.yml
+  when: coolify_s3_enabled | bool

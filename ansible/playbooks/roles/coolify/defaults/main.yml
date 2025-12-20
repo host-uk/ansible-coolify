@@ -30,3 +30,18 @@ coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
 
 # State path (relative to inventory)
 coolify_state_path: "{{ inventory_dir }}/../state"
+
+# S3 Backup Settings
+coolify_s3_enabled: true
+coolify_s3_endpoint: "https://fsn1.your-objectstorage.com"
+coolify_s3_bucket: "hostuk"
+coolify_s3_region: "fsn1"
+coolify_s3_access_key: "{{ lookup('env', 'HETZNER_S3_ACCESS_KEY') | default('') }}"
+coolify_s3_secret_key: "{{ lookup('env', 'HETZNER_S3_SECRET_KEY') | default('') }}"
+coolify_s3_path: "state"
+coolify_backup_encryption_key_path: "~/.ssh/hostuk"
+
+# Hetzner Cloud/Robot Settings
+hetzner_hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') | default('') }}"
+hetzner_robot_user: "{{ lookup('env', 'HETZNER_ROBOT_USER') | default('') }}"
+hetzner_robot_password: "{{ lookup('env', 'HETZNER_ROBOT_PASSWORD') | default('') }}"

@@ -1,0 +1,183 @@
+trigger:
+  batch: true
+  branches:
+    include: [main, stable-1]
+
+pr:
+  autoCancel: true
+  drafts: false
+  branches:
+    include: [main, stable-1]
+
+schedules:
+  - cron: 0 9 * * *
+    displayName: Nightly
+    always: true
+    branches:
+      include: [main, stable-1]
+
+variables:
+  - name: checkoutPath
+    value: ansible_collections/hetzner/hcloud
+  - name: coverageBranches
+    value: main
+  - name: pipelinesCoverage
+    value: coverage
+  - name: entryPoint
+    value: tests/utils/ci.sh
+  - name: fetchDepth
+    value: 0
+
+resources:
+  containers:
+    - container: default
+      image: quay.io/ansible/azure-pipelines-test-container:7.0.0
+
+pool: Standard
+
+stages:
+  ### Sanity
+  - stage: Sanity_devel
+    displayName: Sanity devel
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: Sanity
+              test: devel/sanity
+
+  - stage: Sanity_2_20
+    displayName: Sanity 2.20
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: Sanity
+              test: 2.20/sanity
+
+  - stage: Sanity_2_19
+    displayName: Sanity 2.19
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: Sanity
+              test: 2.19/sanity
+
+  - stage: Sanity_2_18
+    displayName: Sanity 2.18
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: Sanity
+              test: 2.18/sanity
+
+  ### Units
+  - stage: Units_devel
+    displayName: Units devel
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: (py3.14)
+              test: devel/units/3.14
+
+  - stage: Units_2_20
+    displayName: Units 2.20
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: (py3.12)
+              test: 2.20/units/3.12
+
+  - stage: Units_2_19
+    displayName: Units 2.19
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: (py3.13)
+              test: 2.19/units/3.11
+
+  - stage: Units_2_18
+    displayName: Units 2.18
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          targets:
+            - name: (py3.11)
+              test: 2.18/units/3.11
+
+  ## Integration
+  - stage: Integration_devel
+    displayName: Integration devel
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          groups: [1, 2, 3]
+          targets:
+            - name: (py3.14)
+              test: devel/integration/3.14
+
+  - stage: Integration_2_20
+    displayName: Integration 2.20
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          groups: [1, 2, 3]
+          targets:
+            - name: (py3.12)
+              test: 2.20/integration/3.12
+
+  - stage: Integration_2_19
+    displayName: Integration 2.19
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          groups: [1, 2, 3]
+          targets:
+            - name: (py3.11)
+              test: 2.19/integration/3.11
+
+  - stage: Integration_2_18
+    displayName: Integration 2.18
+    dependsOn: []
+    jobs:
+      - template: templates/matrix.yml
+        parameters:
+          groups: [1, 2, 3]
+          targets:
+            - name: (py3.11)
+              test: 2.18/integration/3.11
+
+  ### Finally
+  - stage: Summary
+    condition: succeededOrFailed()
+    dependsOn:
+      - Sanity_devel
+      - Sanity_2_20
+      - Sanity_2_19
+      - Sanity_2_18
+      - Units_devel
+      - Units_2_20
+      - Units_2_19
+      - Units_2_18
+      - Integration_devel
+      - Integration_2_20
+      - Integration_2_19
+      - Integration_2_18
+    jobs:
+      - template: templates/coverage.yml

@@ -1,0 +1,8 @@
+download_url: https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/amazon-aws-10.1.2.tar.gz
+format_version: 1.0.0
+name: aws
+namespace: amazon
+server: https://galaxy.ansible.com/api/
+signatures: []
+version: 10.1.2
+version_url: /api/v3/plugin/ansible/content/published/collections/index/amazon/aws/versions/10.1.2/

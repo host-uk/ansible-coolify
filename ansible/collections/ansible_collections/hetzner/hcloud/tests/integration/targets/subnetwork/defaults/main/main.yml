@@ -1,0 +1,63 @@
+# Copyright: (c) 2019, Hetzner Cloud GmbH <info@hetzner-cloud.de>
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+---
+hcloud_network_name: "{{ hcloud_ns }}"
+# Pool of external Hetzner vSwitch ID, this prevents using the same vSwitch id twice in
+# different jobs.
+hetzner_vswitch_ids:
+  # Hetzner Public account
+  - 43065
+  - 44166
+  - 44167
+  - 44168
+  - 44170
+  - 44171
+  - 44172
+  - 44173
+  - 44174
+  - 44175
+  - 44176
+  - 44177
+  - 44178
+  - 44179
+  - 44180
+  - 44181
+  - 65231
+  - 65232
+  - 65233
+  - 65234
+  - 65235
+  - 65236
+  - 65237
+  - 65238
+  - 65239
+  - 65240
+  - 65241
+  - 65242
+  - 65243
+  - 65244
+  - 65245
+  - 65246
+  - 65247
+  - 65248
+  - 65249
+  - 65250
+  - 65251
+  - 65252
+  - 65253
+  - 65254
+  - 65255
+  - 65256
+  - 65257
+  - 65258
+  - 65259
+  - 65260
+  - 65261
+  - 65262
+  - 65263
+  - 65264
+  # Hetzner Internal account
+  # - 53379
+  # - 53380
+  # - 53381
+  # - 53382

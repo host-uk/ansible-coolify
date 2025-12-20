@@ -44,3 +44,11 @@
         name: common
       vars:
         public_key: "ssh-rsa AAAA... test@example.com"
+
+    - name: Syntax check hetzner_infra role
+      ansible.builtin.include_role:
+        name: hetzner_infra
+      vars:
+        hetzner_hcloud_token: "test-token"
+        hetzner_robot_user: "test-user"
+        hetzner_robot_password: "test-password"
