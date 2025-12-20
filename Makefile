@@ -1,7 +1,7 @@
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
-DEV_CONTROLLER ?= vm-controller.lan
-PROD_CONTROLLER ?= noc.example.com
+DEV_CONTROLLER ?= controller.lan
+PROD_CONTROLLER ?= noc.host.uk.com
 DOCKER_RUN_ARGS = -it --rm \
 	-v $(PWD)/ansible:/ansible \
 	-v $(HOME)/.ssh:/root/.ssh:ro \
@@ -32,7 +32,7 @@ dev-clone-env-pb:
 	$(MAKE) _run-pb PB=playbooks/coolify/environment/clone.yml LIMIT=development
 
 dev-clone-host-uk-lon:
-	$(MAKE) dev-clone-env SOURCE=worker1.example.com TARGET=worker2.example.com PROJECT=example.com
+	$(MAKE) dev-clone-env SOURCE=app1.example.com TARGET=app2.example.com PROJECT=example.com
 
 dev-create-app:
 	$(MAKE) _run-pb PB=playbooks/coolify/application/create.yml LIMIT=development
@@ -65,9 +65,9 @@ dev-hetzner-setup:
 
 dev-login:
 	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
-		eval $$(ssh-agent -s) && ssh-add ~/.ssh/vm-worker; \
+		eval $$(ssh-agent -s) && ssh-add ~/.ssh/controller.lan ~/.ssh/app-server.lan ~/.ssh/builder.lan; \
 	else \
-		ssh-add ~/.ssh/vm-worker; \
+		ssh-add ~/.ssh/controller.lan ~/.ssh/app-server.lan ~/.ssh/builder.lan; \
 	fi
 
 dev-reinstall:
@@ -240,7 +240,7 @@ prod-clone-env-pb:
 	$(MAKE) _run-pb PB=playbooks/coolify/environment/clone.yml LIMIT=production
 
 prod-clone-host-uk-lon:
-	$(MAKE) prod-clone-env SOURCE=worker1.example.com TARGET=worker2.example.com PROJECT=example.com
+	$(MAKE) prod-clone-env SOURCE=app1.example.com TARGET=app2.example.com PROJECT=example.com
 
 prod-create-app:
 	$(MAKE) _run-pb PB=playbooks/coolify/application/create.yml LIMIT=production

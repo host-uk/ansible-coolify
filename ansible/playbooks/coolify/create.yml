@@ -18,8 +18,11 @@
         name: parallels_vm
       vars:
         parallels_vm_name: "{{ item | replace('.lan', '') }}"
-      loop: "{{ groups['development'] | select('search', 'vm-') | list }}"
-      when: groups['development'] is defined
+        parallels_vm_ssh_private_key_file: "{{ hostvars[item].ansible_ssh_private_key_file }}"
+      loop: "{{ groups['development'] | default([]) }}"
+      when: 
+        - groups['development'] is defined
+        - hostvars[item].platform | default('') == 'parallels'
   tags:
     - parallels_vm
 
@@ -31,11 +34,25 @@
   roles:
     - role: common
     - role: coolify
+      vars:
+        # We register nodes in a separate play after they are configured
+        coolify_register_server: false
 
-- name: Worker configuration
-  hosts: worker
+- name: Server configuration
+  hosts: server
   become: true
   become_user: root
   gather_facts: true
   roles:
     - role: common
+
+- name: Register Server in Coolify
+  hosts: controller
+  become: true
+  become_user: root
+  gather_facts: true
+  tasks:
+    - name: Register Nodes
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: register_all_nodes.yml

@@ -1,10 +1,10 @@
 ---
 # Predefined root username for first admin account
-coolify_root_username: ""
+coolify_root_username: "admin"
 # Predefined root user email for first admin account
-coolify_root_user_email: ""
+coolify_root_user_email: "admin@localhost"
 # Predefined root user password for first admin account
-coolify_root_user_password: ""
+coolify_root_user_password: "admin@localhost"
 
 # Custom Docker address pool base (CIDR notation)
 coolify_docker_address_pool_base: "172.16.0.0/12"
@@ -17,37 +17,32 @@ coolify_autoupdate: true
 # Custom Docker registry URL for Coolify images
 coolify_registry_url: "ghcr.io"
 
-# Worker registration settings
-coolify_register_worker: true
-# coolify_worker_name and coolify_private_key_path should be defined in inventory
-coolify_worker_name: "{{ groups['worker'] | first | default('') }}"
+# Server registration settings
+coolify_register_server: true
+coolify_environment_group: "{{ (group_names | intersect(['production', 'development']) | first) | default('production') }}"
+coolify_server: "{{ groups['server'] | default([]) | intersect(groups[coolify_environment_group] | default([])) }}"
+coolify_server_name: "{{ coolify_server | first | default('') }}"
 # Prefer private_ip if defined, otherwise fall back to ansible_host
-coolify_worker_ip: "{{ hostvars[coolify_worker_name]['private_ip'] | default(hostvars[coolify_worker_name]['ansible_host'], true) | default(coolify_worker_name, true) if coolify_worker_name else '' }}"
+coolify_server_ip: "{{ hostvars[coolify_server_name]['private_ip'] | default(hostvars[coolify_server_name]['ansible_host'], true) | default(coolify_server_name, true) if coolify_server_name else '' }}"
+# coolify_private_key_path should be defined in inventory if not using default
 coolify_private_key_path: ""
+coolify_key_name: "{{ inventory_hostname }}"
 
 # API settings
-coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+coolify_api_base_url: "http://127.0.0.1:8000/api/v1"
 
 # State path (relative to inventory)
 coolify_state_path: "{{ inventory_dir }}/../state"
 
-# S3 Backup Settings (HostUK Private Storage)
-hostuk_s3_enabled: true
-hostuk_s3_endpoint: ""
-hostuk_s3_bucket: ""
-hostuk_s3_region: ""
-hostuk_s3_access_key: "{{ lookup('env', 'HETZNER_S3_ACCESS_KEY') | default('') }}"
-hostuk_s3_secret_key: "{{ lookup('env', 'HETZNER_S3_SECRET_KEY') | default('') }}"
-hostuk_s3_path: "state"
-hostuk_backup_encryption_key_path: "~/.ssh/hostuk"
-
-# Coolify Application S3 Storage (Public Storage)
-coolify_s3_app_enabled: true
-coolify_s3_app_endpoint: ""
-coolify_s3_app_bucket: ""
-coolify_s3_app_region: ""
-coolify_s3_app_access_key: "{{ lookup('env', 'HETZNER_S3_APP_ACCESS_KEY') | default(hostuk_s3_access_key) }}"
-coolify_s3_app_secret_key: "{{ lookup('env', 'HETZNER_S3_APP_SECRET_KEY') | default(hostuk_s3_secret_key) }}"
+# S3 Storage Settings (Unified)
+s3_enabled: true
+s3_endpoint: ""
+s3_bucket: ""
+s3_region: ""
+s3_access_key: "{{ lookup('env', 'HETZNER_S3_ACCESS_KEY') | default('') }}"
+s3_secret_key: "{{ lookup('env', 'HETZNER_S3_SECRET_KEY') | default('') }}"
+s3_path: "state"
+backup_encryption_key_path: "~/.ssh/hostuk"
 
 # Hetzner Cloud/Robot Settings
 hetzner_hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') | default('') }}"

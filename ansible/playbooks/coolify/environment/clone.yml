@@ -8,8 +8,8 @@
     # Environment names should be passed as extra vars
     source_env_name: "{{ coolify_source_env_name | default('') }}"
     target_env_name: "{{ coolify_target_env_name | default('') }}"
-    # Use inventory_hostname to ensure we talk to the correct controller
-    coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+    # Use 127.0.0.1 to avoid DNS issues when running on the controller
+    coolify_api_base_url: "http://127.0.0.1:8000/api/v1"
 
   tasks:
     - name: Validate mandatory variables

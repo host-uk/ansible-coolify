@@ -16,6 +16,16 @@
     path: /data/coolify/source/.env
   register: coolify_bin
 
+- name: Validate Admin Password Strength
+  ansible.builtin.assert:
+    that:
+      - coolify_root_user_password | length >= 8
+      - coolify_root_user_password is search('[!@#$%^&*(),.?":{}|<>]')
+    fail_msg: "Admin password must be at least 8 characters long and contain at least one special character."
+  when: 
+    - coolify_root_user_password != ""
+    - not coolify_bin.stat.exists or coolify_api_token | default("") == ""
+
 - name: Download Coolify installation script
   ansible.builtin.get_url:
     url: "https://cdn.coollabs.io/coolify/install.sh"
@@ -81,16 +91,16 @@
     line: "{{ item.key }}={{ item.value }}"
     state: present
   loop:
-    - { key: 'S3_ENABLED', value: "{{ coolify_s3_app_enabled | string | lower }}" }
-    - { key: 'S3_ENDPOINT', value: "{{ coolify_s3_app_endpoint }}" }
-    - { key: 'S3_REGION', value: "{{ coolify_s3_app_region }}" }
-    - { key: 'S3_BUCKET', value: "{{ coolify_s3_app_bucket }}" }
-    - { key: 'S3_ACCESS_KEY', value: "{{ coolify_s3_app_access_key }}" }
-    - { key: 'S3_SECRET_KEY', value: "{{ coolify_s3_app_secret_key }}" }
+    - { key: 'S3_ENABLED', value: "{{ s3_enabled | string | lower }}" }
+    - { key: 'S3_ENDPOINT', value: "{{ s3_endpoint }}" }
+    - { key: 'S3_REGION', value: "{{ s3_region }}" }
+    - { key: 'S3_BUCKET', value: "{{ s3_bucket }}" }
+    - { key: 'S3_ACCESS_KEY', value: "{{ lookup('env', 'HETZNER_S3_APP_ACCESS_KEY') | default(s3_access_key) }}" }
+    - { key: 'S3_SECRET_KEY', value: "{{ lookup('env', 'HETZNER_S3_APP_SECRET_KEY') | default(s3_secret_key) }}" }
   when: 
     - ansible_os_family == 'Debian'
     - coolify_env_file.stat.exists
-    - coolify_s3_app_enabled | bool
+    - s3_enabled | bool
   no_log: true
   notify: Restart Coolify containers
 
@@ -100,12 +110,5 @@
 - name: Setup Private Key
   ansible.builtin.include_tasks: key_setup.yml
 
-- name: Register Workers
-  ansible.builtin.include_tasks: server_setup.yml
-  loop: "{{ coolify_workers }}"
-  loop_control:
-    loop_var: worker_item
-  when: 
-    - coolify_register_worker | bool
-    - coolify_workers is defined
-    - coolify_workers | length > 0
+- name: Register All Nodes
+  ansible.builtin.include_tasks: register_all_nodes.yml

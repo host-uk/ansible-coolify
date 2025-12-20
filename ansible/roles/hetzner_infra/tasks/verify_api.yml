@@ -1,23 +1,23 @@
 ---
 - name: Verify S3 API Access
   amazon.aws.s3_bucket_info:
-    endpoint_url: "{{ hostuk_s3_endpoint }}"
-    region: "{{ hostuk_s3_region }}"
-    access_key: "{{ hostuk_s3_access_key }}"
-    secret_key: "{{ hostuk_s3_secret_key }}"
+    endpoint_url: "{{ s3_endpoint }}"
+    region: "{{ s3_region }}"
+    access_key: "{{ s3_access_key }}"
+    secret_key: "{{ s3_secret_key }}"
   register: s3_buckets_info
   delegate_to: localhost
   become: false
   when: 
-    - hostuk_s3_enabled | bool
-    - hostuk_s3_access_key != ""
-    - hostuk_s3_secret_key != ""
+    - s3_enabled | bool
+    - s3_access_key != ""
+    - s3_secret_key != ""
 
 - name: Debug S3 Buckets
   ansible.builtin.debug:
     msg: "Found S3 buckets: {{ s3_buckets_info.buckets | map(attribute='name') | list }}"
   when: 
-    - hostuk_s3_enabled | bool
+    - s3_enabled | bool
     - s3_buckets_info is defined
     - s3_buckets_info.buckets is defined
 

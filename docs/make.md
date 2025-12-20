@@ -237,21 +237,21 @@ make prod-docker-deploy
   import_playbook: playbooks/coolify/application/sync.yml
   vars:
     coolify_source_controller: "noc.example.com"
-    coolify_target_controller: "vm-controller.lan"
+    coolify_target_controller: "controller.lan"
 ```
 
 ##### `dev-sync-apps`
 **Raw Command**:
 ```bash
 cd ansible && ansible-playbook -i inventory/ playbooks/coolify/application/sync.yml \
-    -e coolify_source_controller=noc.example.com -e coolify_target_controller=vm-controller.lan
+    -e coolify_source_controller=noc.host.uk.com -e coolify_target_controller=controller.lan
 ```
 
 ##### `prod-sync-apps`
 **Raw Command**:
 ```bash
 cd ansible && ansible-playbook -i inventory/ playbooks/coolify/application/sync.yml \
-    -e coolify_source_controller=vm-controller.lan -e coolify_target_controller=noc.example.com
+    -e coolify_source_controller=controller.lan -e coolify_target_controller=noc.host.uk.com
 ```
 
 ---

@@ -46,21 +46,16 @@ This project distinguishes between two separate S3-compatible buckets, both host
 
 The configuration is primarily managed in `ansible/inventory/inventory.yml` under the `all.vars` section, allowing for environment-specific overrides:
 
-**Private Storage (Infrastructure Backups):**
-- `hostuk_s3_enabled`: Enable/disable S3 backup.
-- `hostuk_s3_endpoint`: S3-compatible endpoint (e.g., `https://fsn1.your-objectstorage.com`).
-- `hostuk_s3_bucket`: Destination bucket (`hostuk`).
-- `hostuk_s3_path`: Base path within the bucket.
-- `hostuk_backup_encryption_key_path`: Path to the SSH key used for encryption (defined in `roles/coolify/defaults/main.yml`).
-
-**Public Storage (Application Files):**
-- `coolify_s3_app_enabled`: Enable/disable app storage configuration.
-- `coolify_s3_app_endpoint`: S3-compatible endpoint.
-- `coolify_s3_app_bucket`: Destination bucket (`host-uk`).
-- `coolify_s3_app_region`: S3 region (e.g., `fsn1`).
+**S3 Storage (Unified):**
+- `s3_enabled`: Enable/disable S3 features (Backup and App storage).
+- `s3_endpoint`: S3-compatible endpoint (e.g., `https://fsn1.your-objectstorage.com`).
+- `s3_bucket`: Destination bucket (overridden at host level).
+- `s3_region`: S3 region (e.g., `fsn1`).
+- `s3_path`: Base path within the bucket (primarily for backups).
+- `backup_encryption_key_path`: Path to the SSH key used for encryption (defined in `roles/coolify/defaults/main.yml`).
 
 Credentials should be provided via environment variables:
-- `HETZNER_S3_ACCESS_KEY` (Private)
-- `HETZNER_S3_SECRET_KEY` (Private)
-- `HETZNER_S3_APP_ACCESS_KEY` (Public - falls back to Private if not set)
-- `HETZNER_S3_APP_SECRET_KEY` (Public - falls back to Private if not set)
+- `HETZNER_S3_ACCESS_KEY`
+- `HETZNER_S3_SECRET_KEY`
+- `HETZNER_S3_APP_ACCESS_KEY` (Optional fallback for Coolify app storage)
+- `HETZNER_S3_APP_SECRET_KEY` (Optional fallback for Coolify app storage)

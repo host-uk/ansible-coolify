@@ -17,20 +17,61 @@
   until: artisan_check.rc == 0
   retries: 30
   delay: 2
-  when: not token_file_stat.stat.exists
   changed_when: false
+
+- name: Ensure Coolify API is enabled
+  ansible.builtin.shell: |
+    docker exec coolify php artisan tinker --execute='
+    try {
+        $settings = \App\Models\InstanceSettings::first();
+        if ($settings) {
+            if (!$settings->is_api_enabled) {
+                $settings->is_api_enabled = true;
+                $settings->save();
+                echo "API_ENABLED";
+            } else {
+                echo "API_ALREADY_ENABLED";
+            }
+        } else {
+            \App\Models\InstanceSettings::create(["is_api_enabled" => true]);
+            echo "API_SETTINGS_CREATED";
+        }
+    } catch (\Exception $e) {
+        echo "API_ENABLE_ERROR: " . $e->getMessage();
+    }
+    '
+  register: api_enable_result
+  changed_when: "'API_ENABLED' in api_enable_result.stdout or 'API_SETTINGS_CREATED' in api_enable_result.stdout"
+  when: not ansible_check_mode
+  no_log: true
 
 - name: Setup Coolify API and Token
   ansible.builtin.shell: |
     docker exec coolify php artisan tinker --execute='
     $tokenName = "ansible-token";
     $user = \App\Models\User::first();
+    
+    if (!$user && "{{ coolify_root_user_email }}" != "") {
+        $user = \App\Models\User::create([
+            "name" => "{{ coolify_root_username }}",
+            "email" => "{{ coolify_root_user_email }}",
+            "password" => \Illuminate\Support\Facades\Hash::make("{{ coolify_root_user_password }}"),
+            "email_verified_at" => now(),
+        ]);
+    }
     if ($user) {
         $token = $user->tokens()->where("name", $tokenName)->first();
         if ($token) {
             $token->delete();
         }
         $team = $user->teams()->first();
+        if (!$team) {
+            $team = \App\Models\Team::create([
+                "name" => $user->name . " Team",
+                "personal_team" => true,
+            ]);
+            $user->teams()->attach($team->id, ["role" => "admin"]);
+        }
         if ($team) {
             $plainToken = \Illuminate\Support\Str::random(40);
             $newToken = new \Laravel\Sanctum\PersonalAccessToken();
@@ -87,14 +128,3 @@
     msg: "Coolify API token is empty. This usually means the Coolify instance is not ready or no admin user exists yet."
   when: coolify_api_token == ""
 
-- name: Enable Coolify API via Endpoint
-  ansible.builtin.uri:
-    url: "{{ coolify_api_base_url }}/enable"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ coolify_api_token }}"
-    status_code: [200, 401]
-  register: api_enable_result
-  when: 
-    - not ansible_check_mode
-    - coolify_api_token != ""

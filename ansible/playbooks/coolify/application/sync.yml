@@ -3,10 +3,10 @@
   hosts: controller
   become: true
   vars:
-    coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+    coolify_api_base_url: "http://127.0.0.1:8000/api/v1"
     # Defaults to syncing from dev to prod
-    source_controller: "{{ coolify_source_controller | default('vm-controller.lan') }}"
-    target_controller: "{{ coolify_target_controller | default('noc.example.com') }}"
+    source_controller: "{{ coolify_source_controller | default('controller.lan') }}"
+    target_controller: "{{ coolify_target_controller | default('noc.host.uk.com') }}"
   tasks:
     - name: Get API Token from Source
       ansible.builtin.include_role:
@@ -74,8 +74,8 @@
   hosts: controller
   become: true
   vars:
-    source_controller: "{{ coolify_source_controller | default('vm-controller.lan') }}"
-    target_controller: "{{ coolify_target_controller | default('noc.example.com') }}"
+    source_controller: "{{ coolify_source_controller | default('controller.lan') }}"
+    target_controller: "{{ coolify_target_controller | default('noc.host.uk.com') }}"
   tasks:
     - name: Skip if not target controller
       ansible.builtin.meta: end_host

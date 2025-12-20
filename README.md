@@ -19,7 +19,7 @@ This repository contains Ansible playbooks to set up and harden bare metal serve
    - Production: `ansible-playbook -l production playbooks/coolify/create.yml`
    - Development: `ansible-playbook -l development playbooks/coolify/create.yml`
 
-For more details, see [Quick Start Guide](docs/docs/quick_start.md).
+For more details, see [Quick Start Guide](docs/quick_start.md).
 
 ## Systems and Hosts (Example)
 
@@ -29,8 +29,8 @@ For more details, see [Quick Start Guide](docs/docs/quick_start.md).
     - `controller.example.com` (Production Controller)
     - `controller.lan` (Development Controller)
 - **Workers**:
-    - `worker1.example.com` (App Server)
-    - `worker2.example.com` (App Server)
+    - `worker1.example.com` (Server)
+    - `worker2.example.com` (Server)
     - `build.example.com` (Docker Build Server)
 
 ## S3 Storage

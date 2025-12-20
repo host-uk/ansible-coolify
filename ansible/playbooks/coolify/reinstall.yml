@@ -18,8 +18,8 @@
   become_user: root
   gather_facts: true
   vars:
-    # Disable worker registration during reinstall as it's handled by DB restore
-    coolify_register_worker: false
+    # Disable server registration during reinstall as it's handled by DB restore
+    coolify_register_server: false
 
   tasks:
     - name: Perform Backup
