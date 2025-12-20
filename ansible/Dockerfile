@@ -3,7 +3,6 @@ FROM python:3.12-slim
 WORKDIR /ansible
 
 ENV ANSIBLE_CONFIG=./ansible.cfg
-ENV ANSIBLE_PRIVATE_KEY_FILE=/secrets/ssh_key
 ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && \

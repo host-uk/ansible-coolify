@@ -1,0 +1,20 @@
+services:
+  ansible:
+    build:
+      context: ./ansible
+      dockerfile: Dockerfile
+    image: ansible-coolify
+    container_name: ansible-coolify
+    volumes:
+      - ./ansible:/ansible
+      # Mount the SSH directory to root's .ssh in the container
+      - ~/.ssh:/root/.ssh:ro
+      # Optional: Mount SSH agent socket if available
+      - ${SSH_AUTH_SOCK:-/dev/null}:/run/ssh-agent
+    environment:
+      - ANSIBLE_CONFIG=/ansible/ansible.cfg
+      - SSH_AUTH_SOCK=/run/ssh-agent
+    working_dir: /ansible
+    stdin_open: true
+    tty: true
+    command: /bin/bash

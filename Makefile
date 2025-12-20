@@ -3,10 +3,9 @@ ANSIBLE_IMAGE = ansible-coolify
 DEV_CONTROLLER ?= vm-controller.lan
 PROD_CONTROLLER ?= noc.example.com
 DOCKER_RUN_ARGS = -it --rm \
-	-v $(PWD)/ansible/inventory/inventory.yml:/config/inventory.yml \
-	-v $(HOME)/.ssh/id_rsa:/secrets/ssh_key \
-	-v $(HOME)/.ssh/id_rsa.pub:/secrets/ssh_key.pub \
-	-v $(PWD)/ansible:/ansible
+	-v $(PWD)/ansible:/ansible \
+	-v $(HOME)/.ssh:/root/.ssh:ro \
+	$(if $(SSH_AUTH_SOCK),-v $(SSH_AUTH_SOCK):/run/ssh-agent -e SSH_AUTH_SOCK=/run/ssh-agent)
 
 .DEFAULT_GOAL := help
 
@@ -129,6 +128,11 @@ help:
 	@echo "  native-test        - Run all tests"
 	@echo "  native-update-deps - Force update all Ansible collections"
 	@echo ""
+	@echo "Available targets (Docker Compose):"
+	@echo "  up                 - Start the Ansible container in the background"
+	@echo "  down               - Stop and remove the Ansible container"
+	@echo "  shell              - Open a shell in the running Ansible container"
+	@echo ""
 	@echo "Available targets (Production):"
 	@echo "  prod-backup        - Backup Coolify for prod"
 	@echo "  prod-deploy        - Run deployment for prod"
@@ -152,12 +156,10 @@ help:
 # --- Native Targets ---
 
 native-build-ansible:
-	./ansible/scripts/docker_tag.sh
 	cd ansible && docker build -t $(ANSIBLE_IMAGE) .
 
 native-clean:
 	find . -type f -name "*.retry" -delete
-	rm -f ansible/.env .env
 
 native-docker-lint:
 	$(MAKE) _run-docker CMD="/bin/sh -c 'cd /ansible && ansible-lint playbooks/ roles/'"
@@ -203,6 +205,17 @@ native-test-syntax:
 
 native-update-deps:
 	cd ansible && ansible-galaxy collection install -r requirements.yml -p ./collections --force
+
+# --- Docker Compose Targets ---
+
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
+
+shell:
+	docker compose exec ansible /bin/bash
 
 # --- Production Targets ---
 
@@ -313,6 +326,7 @@ _run-docker:
 	dev-hetzner-setup dev-login dev-reinstall dev-restore dev-restore-app dev-restore-db dev-restore-service \
 	dev-sync-apps dev-test-install-config dev-uninstall dev-uninstall-app dev-uninstall-db dev-uninstall-service \
 	help \
+	up down shell \
 	native-build-ansible native-clean native-docker-lint native-docker-test native-install-deps native-lint \
 	native-setup native-start-agent native-test native-test-logic native-test-parallels native-test-syntax native-update-deps \
 	prod-backup prod-clear-host-uk-lon prod-clone-app-de-eu prod-clone-env prod-clone-env-pb prod-clone-host-uk-lon \
