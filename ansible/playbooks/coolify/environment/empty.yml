@@ -17,7 +17,9 @@
       when: env_name == "" or project_uuid == ""
 
     - name: Setup Coolify API and Token
-      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
 
     - name: List All Projects
       ansible.builtin.uri:

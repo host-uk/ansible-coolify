@@ -1,0 +1,105 @@
+---
+- name: "Validate Clone for {{ resource_name }}"
+  block:
+    - name: "Fetch Details for Cloned Resource {{ resource_uuid }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/{{ resource_type }}s/{{ resource_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        timeout: 60
+      register: clone_details
+
+    - name: "Fetch Envs for Cloned Resource {{ resource_uuid }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/{{ resource_type }}s/{{ resource_uuid }}/envs"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        timeout: 60
+      register: clone_envs
+      when: resource_type in ['application', 'service']
+
+    - name: "Initialize Validation"
+      ansible.builtin.set_fact:
+        validation_errors: []
+        # Construct expected values based on source and transformations
+        expected_name: "{{ source_resource.name | replace(source_env_actual_name, target_env_name) }}"
+        expected_description: "{{ source_resource.description | default('') }}"
+        # For docker_compose_raw, we need to apply the same replacement as during creation
+        expected_docker_compose_raw: "{{ source_resource.docker_compose_raw | default('') | replace(source_env_actual_name, target_env_name) }}"
+        # Source envs with transformation
+        expected_envs: "{{ source_envs | default([]) | to_json | replace(source_env_actual_name, target_env_name) | from_json }}"
+
+    - name: "Validate Basic Settings"
+      ansible.builtin.set_fact:
+        validation_errors: "{{ validation_errors + basic_errors }}"
+      vars:
+        basic_errors: >-
+          {%- set errors = [] -%}
+          {%- if clone_details.json.name != expected_name -%}
+            {%- set _ = errors.append('Name mismatch: expected ' + expected_name + ', got ' + (clone_details.json.name | default('UNDEFINED'))) -%}
+          {%- endif -%}
+          {%- if (clone_details.json.description | default('')) != expected_description -%}
+            {%- set _ = errors.append('Description mismatch') -%}
+          {%- endif -%}
+          {{ errors }}
+
+    - name: "Validate Docker Compose Content"
+      ansible.builtin.set_fact:
+        validation_errors: "{{ validation_errors + ['docker_compose_raw mismatch'] }}"
+      when: 
+        - resource_type in ['application', 'service']
+        - source_resource.docker_compose_raw is defined
+        - (clone_details.json.docker_compose_raw | default('')) != expected_docker_compose_raw
+
+    - name: "Validate Application Specific Settings"
+      ansible.builtin.set_fact:
+        validation_errors: "{{ validation_errors + [item.msg] }}"
+      loop:
+        - { check: "{{ clone_details.json.fqdn | default('') == expected_fqdn | default('') }}", msg: "FQDN mismatch: expected '{{ expected_fqdn | default('') }}', got '{{ clone_details.json.fqdn | default('') }}'" }
+        - { check: "{{ clone_details.json.ports_exposes == source_resource.ports_exposes }}", msg: "ports_exposes mismatch" }
+        - { check: "{{ (clone_details.json.ports_mappings | default('')) == (source_resource.ports_mappings | default('')) }}", msg: "ports_mappings mismatch: expected '{{ source_resource.ports_mappings | default('') }}', got '{{ clone_details.json.ports_mappings | default('') }}'" }
+      when: 
+        - resource_type == 'application'
+        - not item.check
+
+    - name: "Validate Database Specific Settings"
+      ansible.builtin.set_fact:
+        validation_errors: "{{ validation_errors + [item.msg] }}"
+      loop:
+        - { check: "{{ clone_details.json.is_public | default(false) == source_resource.is_public | default(false) }}", msg: "is_public mismatch" }
+        - { check: "{{ clone_details.json.public_port | default(none) == source_resource.public_port | default(none) }}", msg: "public_port mismatch" }
+        - { check: "{{ (clone_details.json.ports_mappings | default('')) == (source_resource.ports_mappings | default('')) }}", msg: "ports_mappings mismatch" }
+      when: 
+        - resource_type == 'database'
+        - not item.check
+
+    - name: "Validate Environment Variables"
+      ansible.builtin.set_fact:
+        validation_errors: "{{ validation_errors + mismatch_errors }}"
+      vars:
+        mismatch_errors: >-
+          {%- set errors = [] -%}
+          {%- set cloned_envs_list = clone_envs.json | default([]) -%}
+          {%- for item in (expected_envs | default([])) -%}
+            {%- set actual_item = cloned_envs_list | selectattr('key', 'equalto', item.key) | first | default(none) -%}
+            {%- set actual_value = actual_item.value if actual_item is not none else 'MISSING' -%}
+            {%- if actual_value != item.value -%}
+              {%- set _ = errors.append('Env var mismatch for ' + item.key + ': expected ' + (item.value | string) + ', got ' + (actual_value | string)) -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ errors }}
+      when:
+        - resource_type in ['application', 'service']
+        - expected_envs is defined
+
+    - name: "Diff Task Result"
+      ansible.builtin.debug:
+        msg: "Validation PASSED for {{ resource_type }} '{{ resource_name }}'"
+      when: validation_errors | length == 0
+
+    - name: "Fail if validation errors found"
+      ansible.builtin.fail:
+        msg: "Validation FAILED for cloned {{ resource_type }} '{{ resource_name }}':\n{{ validation_errors | join('\n') }}"
+      when: validation_errors | length > 0

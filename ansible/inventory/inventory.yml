@@ -33,19 +33,17 @@ all:
           - build.de.host.uk.com
     development:
       hosts:
-        vm-worker:
-          ansible_host: vm-worker
+        vm-controller.lan:
           ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
-        vm-controller:
-          ansible_host: vm-controller
+        vm-worker.lan:
           ansible_ssh_private_key_file: /Users/snider/.ssh/vm-worker
       vars:
-        coolify_worker_name: "vm-worker"
+        coolify_worker_name: "vm-worker.lan"
         coolify_private_key_path: "~/.ssh/vm-worker"
         public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/vm-worker.pub', errors='ignore') }}"
         coolify_key_name: "dev-worker-key"
         coolify_workers:
-          - vm-worker
+          - vm-worker.lan
     # Role-based groups
     app_servers:
       hosts:
@@ -62,11 +60,11 @@ all:
     controller:
       hosts:
         noc.host.uk.com:
-        vm-controller:
+        vm-controller.lan:
     worker:
       hosts:
         de.host.uk.com:
         de2.host.uk.com:
         build.de.host.uk.com:
-        vm-worker:
+        vm-worker.lan:
 

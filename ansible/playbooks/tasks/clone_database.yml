@@ -42,7 +42,8 @@
               'instant_deploy': true,
               'image': db_details.json.image | default(none),
               'is_public': db_details.json.is_public | default(none),
-              'public_port': db_details.json.public_port | default(none)
+              'public_port': db_details.json.public_port | default(none),
+              'ports_mappings': db_details.json.ports_mappings | default(none)
             } | combine(
               (resolved_db_type == 'postgresql') | ternary({
                 'postgres_user': db_details.json.postgres_user | default(none),
@@ -97,4 +98,14 @@
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
+        timeout: 120
+      when: coolify_database_uuid is defined and coolify_database_uuid != ""
+
+    - name: "Validate Database Clone: {{ db_item.name }}"
+      ansible.builtin.include_tasks: validate_resource.yml
+      vars:
+        resource_type: "database"
+        resource_uuid: "{{ coolify_database_uuid }}"
+        resource_name: "{{ db_item.name }}"
+        source_resource: "{{ db_details.json }}"
       when: coolify_database_uuid is defined and coolify_database_uuid != ""

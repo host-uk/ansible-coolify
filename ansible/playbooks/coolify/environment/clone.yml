@@ -18,7 +18,9 @@
       when: source_env_name == "" or target_env_name == "" or project_uuid == ""
 
     - name: Setup Coolify API and Token
-      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
 
     - name: List All Projects
       ansible.builtin.uri:
@@ -62,6 +64,11 @@
         source_env_actual_name: "{{ source_env.name }}"
       when: source_env is not none
 
+    - name: Fail if Source Environment name is empty
+      ansible.builtin.fail:
+        msg: "Source environment name is empty. Cannot proceed with cloning as it would lead to incorrect string replacements."
+      when: source_env_actual_name | default('') == ""
+
     - name: Debug Resolved Info
       ansible.builtin.debug:
         msg:
@@ -101,7 +108,7 @@
         source_apps: "{{ all_apps.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
 
     - name: Clone Applications
-      ansible.builtin.include_tasks: tasks/clone_application.yml
+      ansible.builtin.include_tasks: ../../tasks/clone_application.yml
       loop: "{{ source_apps }}"
       loop_control:
         loop_var: app_item
@@ -119,7 +126,7 @@
         source_services: "{{ all_services.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
 
     - name: Clone Services
-      ansible.builtin.include_tasks: tasks/clone_service.yml
+      ansible.builtin.include_tasks: ../../tasks/clone_service.yml
       loop: "{{ source_services }}"
       loop_control:
         loop_var: service_item
@@ -138,7 +145,7 @@
       when: all_databases.json is defined and all_databases.json is iterable
 
     - name: Clone Databases
-      ansible.builtin.include_tasks: tasks/clone_database.yml
+      ansible.builtin.include_tasks: ../../tasks/clone_database.yml
       loop: "{{ source_databases | default([]) }}"
       loop_control:
         loop_var: db_item

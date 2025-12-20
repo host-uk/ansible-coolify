@@ -8,3 +8,4 @@ coolify_application_instant_deploy: true
 coolify_application_use_build_server: true
 coolify_application_connect_to_docker_network: true
 coolify_application_force_domain_override: false
+coolify_application_ports_mappings: ""

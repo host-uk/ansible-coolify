@@ -47,4 +47,15 @@
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
+        timeout: 120
+      when: coolify_service_uuid is defined and coolify_service_uuid != ""
+
+    - name: "Validate Service Clone: {{ service_item.name }}"
+      ansible.builtin.include_tasks: validate_resource.yml
+      vars:
+        resource_type: "service"
+        resource_uuid: "{{ coolify_service_uuid }}"
+        resource_name: "{{ service_item.name }}"
+        source_resource: "{{ service_details.json }}"
+        source_envs: "{{ service_envs.json }}"
       when: coolify_service_uuid is defined and coolify_service_uuid != ""

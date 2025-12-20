@@ -12,7 +12,7 @@
 
 - name: Upload database dump
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/coolify_db.dump"
+    src: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify/coolify_db.dump"
     dest: /tmp/coolify_db.dump
     mode: '0600'
 
@@ -40,13 +40,13 @@
 
 - name: Upload and extract SSH keys
   ansible.builtin.unarchive:
-    src: "{{ playbook_dir }}/../backups/{{ inventory_hostname }}/reinstall/coolify_ssh_keys.tar.gz"
+    src: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify/coolify_ssh_keys.tar.gz"
     dest: /data/coolify/ssh/keys
     remote_src: false
 
 - name: Read saved APP_KEY from local file
   ansible.builtin.set_fact:
-    previous_app_key: "{{ lookup('file', playbook_dir + '/../backups/' + inventory_hostname + '/reinstall/APP_KEY') }}"
+    previous_app_key: "{{ lookup('file', coolify_state_path + '/' + inventory_hostname + '/backups/coolify/APP_KEY') }}"
 
 - name: Update .env with APP_PREVIOUS_KEYS
   ansible.builtin.lineinfile:

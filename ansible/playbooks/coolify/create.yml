@@ -20,27 +20,6 @@
   tags:
     - parallels_vm
 
-- name: Worker configuration
-  hosts: worker
-  become: true
-  become_user: root
-  gather_facts: true
-  roles:
-    - role: common
-
-  tasks:
-    - name: Allow incoming traffic on specified ports
-      community.general.ufw:
-        rule: allow
-        port: "{{ item }}"
-      loop:
-        - 22
-        - 80
-        - 443
-        - 6001
-        - 6002
-      when: ansible_os_family == 'Debian'
-
 - name: Install Coolify on controller host
   hosts: controller
   become: true
@@ -49,3 +28,11 @@
   roles:
     - role: common
     - role: coolify
+
+- name: Worker configuration
+  hosts: worker
+  become: true
+  become_user: root
+  gather_facts: true
+  roles:
+    - role: common

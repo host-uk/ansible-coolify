@@ -24,8 +24,13 @@
       Authorization: "Bearer {{ coolify_api_token }}"
       Content-Type: "application/json"
     body_format: json
-    body:
-      name: "{{ coolify_database_body.name | default(omit, true) }}"
-      description: "{{ coolify_database_body.description | default(omit, true) }}"
+    body: "{{ patch_body | dict2items | rejectattr('value', 'undefined') | rejectattr('value', 'none') | list | items2dict }}"
     status_code: [200, 201]
+  vars:
+    patch_body:
+      name: "{{ coolify_database_body.name | default(none, true) }}"
+      description: "{{ coolify_database_body.description | default(none, true) }}"
+      is_public: "{{ coolify_database_body.is_public | default(none) }}"
+      public_port: "{{ coolify_database_body.public_port | default(none) }}"
+      ports_mappings: "{{ coolify_database_body.ports_mappings | default(none, true) }}"
   when: coolify_database_uuid is defined and coolify_database_uuid != ""

@@ -11,6 +11,15 @@
   changed_when: false
   no_log: true
 
+- name: Wait for Coolify container to be ready
+  ansible.builtin.command: docker exec coolify php artisan --version
+  register: artisan_check
+  until: artisan_check.rc == 0
+  retries: 30
+  delay: 2
+  when: not token_file_stat.stat.exists
+  changed_when: false
+
 - name: Setup Coolify API and Token
   ansible.builtin.shell: |
     docker exec coolify php artisan tinker --execute='
@@ -43,19 +52,40 @@
 
 - name: Save API token to host for reuse
   ansible.builtin.copy:
-    content: "{{ api_token_result.stdout | trim }}"
+    content: "{{ api_token_result.stdout_lines | last | trim }}"
     dest: /data/coolify/ansible-token
     mode: '0600'
   when: 
     - not token_file_stat.stat.exists 
-    - api_token_result is defined and api_token_result.stdout is defined
-    - api_token_result.stdout | trim != ""
+    - api_token_result is defined
+    - api_token_result.stdout_lines | default([]) | length > 0
   no_log: true
 
-- name: Set API Token fact
+- name: Initialize API Token fact
   ansible.builtin.set_fact:
-    coolify_api_token: "{{ saved_token.stdout | trim if token_file_stat.stat.exists else api_token_result.stdout | trim }}"
+    coolify_api_token: ""
+
+- name: Set API Token fact from saved file
+  ansible.builtin.set_fact:
+    coolify_api_token: "{{ saved_token.stdout_lines | last | trim }}"
+  when: 
+    - token_file_stat.stat.exists
+    - saved_token.stdout_lines | default([]) | length > 0
   no_log: true
+
+- name: Set API Token fact from command result
+  ansible.builtin.set_fact:
+    coolify_api_token: "{{ api_token_result.stdout_lines | last | trim }}"
+  when: 
+    - not token_file_stat.stat.exists
+    - api_token_result is defined
+    - api_token_result.stdout_lines | default([]) | length > 0
+  no_log: true
+
+- name: Validate API Token
+  ansible.builtin.fail:
+    msg: "Coolify API token is empty. This usually means the Coolify instance is not ready or no admin user exists yet."
+  when: coolify_api_token == ""
 
 - name: Enable Coolify API via Endpoint
   ansible.builtin.uri:

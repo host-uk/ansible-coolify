@@ -84,6 +84,7 @@
       name: "{{ coolify_application_name | default(omit, true) }}"
       description: "{{ coolify_application_description | default(omit, true) }}"
       domains: "{{ coolify_application_domains | default(omit, true) }}"
+      ports_mappings: "{{ coolify_application_ports_mappings | default(omit, true) }}"
       docker_compose_raw: "{{ (coolify_application_docker_compose_raw | b64encode) if (coolify_application_docker_compose_raw | default('', true) | length > 0) else omit }}"
     status_code: [200, 201]
   when: coolify_application_uuid is defined and coolify_application_uuid != ""

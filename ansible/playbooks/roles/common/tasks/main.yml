@@ -15,11 +15,16 @@
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+  environment:
+    DEBIAN_FRONTEND: noninteractive
   when: ansible_os_family == 'Debian'
 
 - name: Upgrade all packages
   ansible.builtin.apt:
     upgrade: true
+    dpkg_options: 'force-confold,force-confdef'
+  environment:
+    DEBIAN_FRONTEND: noninteractive
   when: ansible_os_family == 'Debian'
 
 - name: Install public AuthorizedKeysFile
@@ -37,6 +42,8 @@
       - ufw
       - fail2ban
     state: present
+  environment:
+    DEBIAN_FRONTEND: noninteractive
   when: ansible_os_family == 'Debian'
 
 - name: Enable UFW

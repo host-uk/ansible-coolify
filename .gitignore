@@ -40,5 +40,5 @@ terraform.rc
 logs
 .ssh/
 dev/
-ansible/backups/
+ansible/state/
 /.output.txt

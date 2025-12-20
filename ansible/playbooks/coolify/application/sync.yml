@@ -9,7 +9,9 @@
     target_controller: "{{ coolify_target_controller | default('noc.host.uk.com') }}"
   tasks:
     - name: Get API Token from Source
-      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
       when: inventory_hostname == source_controller
 
     - name: Fetch Applications
@@ -80,7 +82,9 @@
       when: inventory_hostname != target_controller
 
     - name: Get API Token from Target
-      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
 
     - name: Process and Create Applications on Target
       ansible.builtin.include_role:

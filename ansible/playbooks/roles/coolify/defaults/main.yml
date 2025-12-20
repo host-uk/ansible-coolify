@@ -27,3 +27,6 @@ coolify_private_key_path: ""
 
 # API settings
 coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+
+# State path (relative to inventory)
+coolify_state_path: "{{ inventory_dir }}/../state"

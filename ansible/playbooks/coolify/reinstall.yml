@@ -23,13 +23,15 @@
 
   tasks:
     - name: Perform Backup
-      ansible.builtin.include_tasks:
-        file: roles/coolify/tasks/backup.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: backup.yml
       when: ansible_os_family == 'Debian'
 
     - name: Perform Uninstall
-      ansible.builtin.include_tasks:
-        file: roles/coolify/tasks/uninstall.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: uninstall.yml
       when: ansible_os_family == 'Debian'
 
     - name: Perform Fresh Install
@@ -38,6 +40,7 @@
       when: ansible_os_family == 'Debian'
 
     - name: Perform Restore
-      ansible.builtin.include_tasks:
-        file: roles/coolify/tasks/restore.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: restore.yml
       when: ansible_os_family == 'Debian'

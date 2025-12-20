@@ -4,7 +4,9 @@
   become: true
   tasks:
     - name: Setup API Token
-      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
 
     - name: Ensure Database is deleted (optional)
       ansible.builtin.include_role:

@@ -1,6 +1,17 @@
 ---
 - name: Register Server in Coolify - {{ worker_item }}
   block:
+    - name: Add Coolify public key to worker authorized_keys
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ coolify_public_key }}"
+      delegate_to: "{{ worker_item }}"
+      when:
+        - not ansible_check_mode
+        - coolify_public_key is defined
+        - coolify_public_key != ""
+
     - name: Get current servers from Coolify
       ansible.builtin.uri:
         url: "{{ coolify_api_base_url }}/servers"

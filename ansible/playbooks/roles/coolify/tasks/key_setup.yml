@@ -1,37 +1,70 @@
 ---
-- name: Add Private Key to Coolify
-  ansible.builtin.uri:
-    url: "{{ coolify_api_base_url }}/security/keys"
-    method: POST
-    headers:
-      Authorization: "Bearer {{ coolify_api_token }}"
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      name: "{{ coolify_key_name }}"
-      private_key: "{{ lookup('file', coolify_private_key_path) }}"
-    status_code: [200, 201, 422]
-  register: key_reg_result
+- name: Ensure state directory exists on local machine
+  ansible.builtin.file:
+    path: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
   when: not ansible_check_mode
 
-- name: Get Private Key UUID
-  ansible.builtin.set_fact:
-    coolify_key_uuid: "{{ key_reg_result.json.uuid if key_reg_result is not skipped and key_reg_result.status | default(0) in [200, 201] else '' }}"
-
-- name: List Private Keys if not registered (find existing)
+- name: List Private Keys from Coolify
   ansible.builtin.uri:
     url: "{{ coolify_api_base_url }}/security/keys"
     method: GET
     headers:
       Authorization: "Bearer {{ coolify_api_token }}"
   register: keys_list
+  when: not ansible_check_mode
+
+- name: Find existing key UUID by name ({{ coolify_key_name }})
+  ansible.builtin.set_fact:
+    coolify_key_uuid: "{{ (keys_list.json | selectattr('name', 'equalto', coolify_key_name) | first).uuid if keys_list is not skipped and keys_list.json is defined and (keys_list.json | selectattr('name', 'equalto', coolify_key_name) | list | length > 0) else '' }}"
+  when: not ansible_check_mode
+
+- name: Fallback to 'default' key UUID if preferred not found
+  ansible.builtin.set_fact:
+    coolify_key_uuid: "{{ (keys_list.json | selectattr('name', 'equalto', 'default') | first).uuid if keys_list is not skipped and keys_list.json is defined and (keys_list.json | selectattr('name', 'equalto', 'default') | list | length > 0) else coolify_key_uuid }}"
   when: 
     - not ansible_check_mode
     - coolify_key_uuid == ""
 
-- name: Find existing key UUID
+- name: Fallback to first available key UUID
   ansible.builtin.set_fact:
-    coolify_key_uuid: "{{ (keys_list.json | selectattr('name', 'equalto', coolify_key_name) | first).uuid if keys_list is not skipped and keys_list.json is defined else coolify_key_uuid }}"
+    coolify_key_uuid: "{{ keys_list.json[0].uuid if keys_list is not skipped and keys_list.json is defined and keys_list.json | length > 0 else coolify_key_uuid }}"
   when: 
     - not ansible_check_mode
     - coolify_key_uuid == ""
+
+- name: Set Public Key fact
+  ansible.builtin.set_fact:
+    coolify_public_key: "{{ (keys_list.json | selectattr('uuid', 'equalto', coolify_key_uuid) | first).public_key }}"
+  when: 
+    - not ansible_check_mode
+    - coolify_key_uuid != ""
+
+- name: Save Coolify public key to local state folder
+  ansible.builtin.copy:
+    content: "{{ coolify_public_key }}"
+    dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify/{{ coolify_key_name }}.pub"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  when:
+    - not ansible_check_mode
+    - coolify_public_key is defined
+    - coolify_public_key != ""
+
+- name: Debug key info
+  ansible.builtin.debug:
+    msg: "Using Private Key UUID: {{ coolify_key_uuid }} with Public Key: {{ coolify_public_key | default('NOT FOUND') }}"
+
+- name: Add Coolify public key to controller authorized_keys
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ coolify_public_key }}"
+  when:
+    - not ansible_check_mode
+    - coolify_public_key is defined
+    - coolify_public_key != ""

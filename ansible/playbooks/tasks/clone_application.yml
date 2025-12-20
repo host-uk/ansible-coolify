@@ -38,6 +38,7 @@
         coolify_application_git_branch: "{{ app_details.json.git_branch | default('') }}"
         coolify_application_build_pack: "{{ app_details.json.build_pack }}"
         coolify_application_ports_exposes: "{{ app_details.json.ports_exposes }}"
+        coolify_application_ports_mappings: "{{ app_details.json.ports_mappings | default('') }}"
         coolify_application_server_uuid: "{{ app_details.json.destination.server.uuid if (app_details.json.destination is defined and app_details.json.destination.server is defined) else '' }}"
         coolify_application_destination_uuid: "{{ app_details.json.destination.uuid if app_details.json.destination is defined else '' }}"
         coolify_application_private_key_uuid: "{{ app_details.json.private_key.uuid if app_details.json.private_key is defined else '' }}"
@@ -51,4 +52,16 @@
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
+        timeout: 120
+      when: coolify_application_uuid is defined and coolify_application_uuid != ""
+
+    - name: "Validate Application Clone: {{ app_item.name }}"
+      ansible.builtin.include_tasks: validate_resource.yml
+      vars:
+        resource_type: "application"
+        resource_uuid: "{{ coolify_application_uuid }}"
+        resource_name: "{{ app_item.name }}"
+        source_resource: "{{ app_details.json }}"
+        source_envs: "{{ app_envs.json }}"
+        expected_fqdn: "{{ app_base_name }}.host.uk.com,{{ app_base_name }}.{{ target_region }}.host.uk.com"
       when: coolify_application_uuid is defined and coolify_application_uuid != ""
