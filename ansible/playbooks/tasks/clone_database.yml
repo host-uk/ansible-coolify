@@ -1,0 +1,56 @@
+---
+- name: "Clone Database: {{ db_item.name }}"
+  block:
+    - name: "Fetch Full Details for Database: {{ db_item.uuid }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases/{{ db_item.uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: db_details
+
+    - name: "Set Database Base Name fact"
+      ansible.builtin.set_fact:
+        # Extract base name by removing the source environment suffix if present
+        db_base_name: "{{ db_details.json.name | default(db_item.name) | replace('.' + source_env_actual_name, '') }}"
+
+    - name: "Create Clone of Database: {{ db_item.name }}"
+      ansible.builtin.include_role:
+        name: coolify-database
+      vars:
+        coolify_database_state: create
+        # Use type from full details if available, otherwise from item
+        coolify_database_type: "{{ db_details.json.type | default(db_item.type | default('postgresql')) }}"
+        coolify_database_body:
+          project_uuid: "{{ project_uuid }}"
+          server_uuid: "{{ db_details.json.server.uuid if (db_details.json.server is defined) else (db_item.server.uuid if db_item.server is defined else '') }}"
+          environment_name: "{{ target_env_name }}"
+          name: "{{ db_base_name }}.{{ target_env_name }}"
+          description: "{{ db_details.json.description | default(db_item.description | default('')) }}"
+          instant_deploy: true
+          # Common fields for various DB types
+          postgres_user: "{{ db_details.json.postgres_user | default(omit) }}"
+          postgres_password: "{{ db_details.json.postgres_password | default(omit) }}"
+          postgres_db: "{{ db_details.json.postgres_db | default(omit) }}"
+          mysql_user: "{{ db_details.json.mysql_user | default(omit) }}"
+          mysql_password: "{{ db_details.json.mysql_password | default(omit) }}"
+          mysql_database: "{{ db_details.json.mysql_database | default(omit) }}"
+          mysql_root_password: "{{ db_details.json.mysql_root_password | default(omit) }}"
+          mariadb_user: "{{ db_details.json.mariadb_user | default(omit) }}"
+          mariadb_password: "{{ db_details.json.mariadb_password | default(omit) }}"
+          mariadb_database: "{{ db_details.json.mariadb_database | default(omit) }}"
+          mariadb_root_password: "{{ db_details.json.mariadb_root_password | default(omit) }}"
+          mongodb_user: "{{ db_details.json.mongodb_user | default(omit) }}"
+          mongodb_password: "{{ db_details.json.mongodb_password | default(omit) }}"
+          redis_password: "{{ db_details.json.redis_password | default(omit) }}"
+          image: "{{ db_details.json.image | default(omit) }}"
+          is_public: "{{ db_details.json.is_public | default(omit) }}"
+          public_port: "{{ db_details.json.public_port | default(omit) }}"
+
+    - name: "Start Database: {{ db_item.name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases/{{ coolify_database_uuid }}/start"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      when: coolify_database_uuid is defined and coolify_database_uuid != ""

@@ -2,13 +2,15 @@
 - name: Test API
   hosts: vm-controller
   become: true
+  vars:
+    coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
   tasks:
     - name: Get API Token
       include_tasks: playbooks/roles/coolify/tasks/api_setup.yml
 
     - name: List Databases
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/databases"
+        url: "{{ coolify_api_base_url }}/databases"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"

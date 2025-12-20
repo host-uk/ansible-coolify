@@ -1,0 +1,135 @@
+---
+- name: Empty Coolify Environment
+  hosts: controller
+  become: true
+  vars:
+    # Project name or UUID
+    project_uuid: "{{ coolify_project_uuid | default('') }}"
+    # Environment name or UUID
+    env_name: "{{ coolify_env_name | default('') }}"
+    # Use inventory_hostname to ensure we talk to the correct controller
+    coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+
+  tasks:
+    - name: Validate mandatory variables
+      ansible.builtin.fail:
+        msg: "Mandatory variables 'env_name' and 'coolify_project_uuid' (project name or UUID) are required. Please provide them via EXTRA_VARS."
+      when: env_name == "" or project_uuid == ""
+
+    - name: Setup Coolify API and Token
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+
+    - name: List All Projects
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_projects
+
+    - name: Resolve Project
+      ansible.builtin.set_fact:
+        # Try to find project by UUID first, then by Name
+        resolved_project: "{{ all_projects.json | selectattr('uuid', 'equalto', project_uuid) | first | default(all_projects.json | selectattr('name', 'equalto', project_uuid) | first | default(none)) }}"
+
+    - name: Fail if Project not found
+      ansible.builtin.fail:
+        msg: "Project '{{ project_uuid }}' not found. Available projects: {{ all_projects.json | map(attribute='name') | list }}"
+      when: resolved_project is none
+
+    - name: Set Project UUID fact
+      ansible.builtin.set_fact:
+        project_uuid: "{{ resolved_project.uuid }}"
+
+    - name: Get Full Project Details
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: project_details
+
+    - name: Find Environment
+      ansible.builtin.set_fact:
+        # Match by name or UUID
+        target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', env_name) | first | default(none)) }}"
+
+    - name: Fail if Environment not found
+      ansible.builtin.fail:
+        msg: "Environment '{{ env_name }}' not found in project {{ resolved_project.name }} ({{ project_uuid }})"
+      when: target_env is none
+
+    - name: Debug Environment Info
+      ansible.builtin.debug:
+        msg: "Emptying environment '{{ target_env.name }}' (ID: {{ target_env.id }}) in project '{{ resolved_project.name }}'"
+
+    - name: Fetch All Applications
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/applications"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_apps
+
+    - name: Filter Applications for Environment
+      ansible.builtin.set_fact:
+        apps_to_delete: "{{ all_apps.json | selectattr('environment_id', 'equalto', target_env.id) | list }}"
+
+    - name: Delete Applications
+      ansible.builtin.include_role:
+        name: coolify-application
+      vars:
+        coolify_application_state: delete
+        coolify_application_uuid: "{{ item.uuid }}"
+      loop: "{{ apps_to_delete }}"
+      loop_control:
+        label: "App: {{ item.name }}"
+
+    - name: Fetch All Services
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_services
+
+    - name: Filter Services for Environment
+      ansible.builtin.set_fact:
+        services_to_delete: "{{ all_services.json | selectattr('environment_id', 'equalto', target_env.id) | list }}"
+
+    - name: Delete Services
+      ansible.builtin.include_role:
+        name: coolify-service
+      vars:
+        coolify_service_state: delete
+        coolify_service_uuid: "{{ item.uuid }}"
+      loop: "{{ services_to_delete }}"
+      loop_control:
+        label: "Service: {{ item.name }}"
+
+    - name: Fetch All Databases
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_databases
+
+    - name: Filter Databases for Environment
+      ansible.builtin.set_fact:
+        databases_to_delete: "{{ all_databases.json | selectattr('environment_id', 'equalto', target_env.id) | list }}"
+      when: all_databases.json is defined and all_databases.json is iterable
+
+    - name: Delete Databases
+      ansible.builtin.include_role:
+        name: coolify-database
+      vars:
+        coolify_database_state: delete
+        coolify_database_uuid: "{{ item.uuid }}"
+      loop: "{{ databases_to_delete | default([]) }}"
+      loop_control:
+        label: "DB: {{ item.name }}"
+
+    - name: Environment Emptied
+      ansible.builtin.debug:
+        msg: "Successfully deleted all resources from environment '{{ env_name }}' in project '{{ resolved_project.name }}'."

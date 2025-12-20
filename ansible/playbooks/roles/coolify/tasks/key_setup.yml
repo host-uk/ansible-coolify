@@ -1,7 +1,7 @@
 ---
 - name: Add Private Key to Coolify
   ansible.builtin.uri:
-    url: "http://localhost:8000/api/v1/security/keys"
+    url: "{{ coolify_api_base_url }}/security/keys"
     method: POST
     headers:
       Authorization: "Bearer {{ coolify_api_token }}"
@@ -20,7 +20,7 @@
 
 - name: List Private Keys if not registered (find existing)
   ansible.builtin.uri:
-    url: "http://localhost:8000/api/v1/security/keys"
+    url: "{{ coolify_api_base_url }}/security/keys"
     method: GET
     headers:
       Authorization: "Bearer {{ coolify_api_token }}"

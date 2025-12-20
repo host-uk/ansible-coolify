@@ -24,3 +24,6 @@ coolify_worker_name: "{{ groups['worker'] | first | default('') }}"
 # Prefer private_ip if defined, otherwise fall back to ansible_host
 coolify_worker_ip: "{{ hostvars[coolify_worker_name]['private_ip'] | default(hostvars[coolify_worker_name]['ansible_host'], true) | default(coolify_worker_name, true) if coolify_worker_name else '' }}"
 coolify_private_key_path: ""
+
+# API settings
+coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"

@@ -59,7 +59,7 @@
 
 - name: Enable Coolify API via Endpoint
   ansible.builtin.uri:
-    url: "http://localhost:8000/api/v1/enable"
+    url: "{{ coolify_api_base_url }}/enable"
     method: GET
     headers:
       Authorization: "Bearer {{ coolify_api_token }}"

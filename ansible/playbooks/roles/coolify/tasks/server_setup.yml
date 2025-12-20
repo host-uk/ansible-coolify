@@ -3,7 +3,7 @@
   block:
     - name: Get current servers from Coolify
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/servers"
+        url: "{{ coolify_api_base_url }}/servers"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
@@ -17,7 +17,7 @@
 
     - name: Post server registration to Coolify
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/servers"
+        url: "{{ coolify_api_base_url }}/servers"
         method: POST
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"

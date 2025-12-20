@@ -10,12 +10,12 @@
     body:
       project_uuid: "{{ coolify_application_project_uuid }}"
       server_uuid: "{{ coolify_application_server_uuid }}"
-      environment_name: "{{ coolify_application_environment_name | default(omit) }}"
-      environment_uuid: "{{ coolify_application_environment_uuid | default(omit) }}"
-      docker_compose_raw: "{{ coolify_application_docker_compose_raw }}"
-      destination_uuid: "{{ coolify_application_destination_uuid | default(omit) }}"
-      name: "{{ coolify_application_name | default(omit) }}"
-      description: "{{ coolify_application_description | default(omit) }}"
+      environment_name: "{{ coolify_application_environment_name | default(omit, true) }}"
+      environment_uuid: "{{ coolify_application_environment_uuid | default(omit, true) }}"
+      docker_compose_raw: "{{ (coolify_application_docker_compose_raw | b64encode) if (coolify_application_docker_compose_raw | default('', true) | length > 0) else omit }}"
+      destination_uuid: "{{ coolify_application_destination_uuid | default(omit, true) }}"
+      name: "{{ coolify_application_name | default(omit, true) }}"
+      description: "{{ coolify_application_description | default(omit, true) }}"
       instant_deploy: "{{ coolify_application_instant_deploy }}"
       use_build_server: "{{ coolify_application_use_build_server }}"
       connect_to_docker_network: "{{ coolify_application_connect_to_docker_network }}"
@@ -35,30 +35,30 @@
     body:
       project_uuid: "{{ coolify_application_project_uuid }}"
       server_uuid: "{{ coolify_application_server_uuid }}"
-      environment_name: "{{ coolify_application_environment_name | default(omit) }}"
-      environment_uuid: "{{ coolify_application_environment_uuid | default(omit) }}"
+      environment_name: "{{ coolify_application_environment_name | default(omit, true) }}"
+      environment_uuid: "{{ coolify_application_environment_uuid | default(omit, true) }}"
       private_key_uuid: "{{ coolify_application_private_key_uuid }}"
       git_repository: "{{ coolify_application_git_repository }}"
       git_branch: "{{ coolify_application_git_branch }}"
       ports_exposes: "{{ coolify_application_ports_exposes }}"
-      destination_uuid: "{{ coolify_application_destination_uuid | default(omit) }}"
+      destination_uuid: "{{ coolify_application_destination_uuid | default(omit, true) }}"
       build_pack: "{{ coolify_application_build_pack | default('dockercompose') }}"
-      name: "{{ coolify_application_name | default(omit) }}"
-      description: "{{ coolify_application_description | default(omit) }}"
-      domains: "{{ coolify_application_domains | default(omit) }}"
-      git_commit_sha: "{{ coolify_application_git_commit_sha | default(omit) }}"
-      docker_registry_image_name: "{{ coolify_application_docker_registry_image_name | default(omit) }}"
-      docker_registry_image_tag: "{{ coolify_application_docker_registry_image_tag | default(omit) }}"
+      name: "{{ coolify_application_name | default(omit, true) }}"
+      description: "{{ coolify_application_description | default(omit, true) }}"
+      domains: "{{ coolify_application_domains | default(omit, true) }}"
+      git_commit_sha: "{{ coolify_application_git_commit_sha | default(omit, true) }}"
+      docker_registry_image_name: "{{ coolify_application_docker_registry_image_name | default(omit, true) }}"
+      docker_registry_image_tag: "{{ coolify_application_docker_registry_image_tag | default(omit, true) }}"
       is_static: "{{ coolify_application_is_static | default(false) }}"
-      static_image: "{{ coolify_application_static_image | default(omit) }}"
-      install_command: "{{ coolify_application_install_command | default(omit) }}"
-      build_command: "{{ coolify_application_build_command | default(omit) }}"
-      start_command: "{{ coolify_application_start_command | default(omit) }}"
-      ports_mappings: "{{ coolify_application_ports_mappings | default(omit) }}"
-      base_directory: "{{ coolify_application_base_directory | default(omit) }}"
-      publish_directory: "{{ coolify_application_publish_directory | default(omit) }}"
+      static_image: "{{ coolify_application_static_image | default(omit, true) }}"
+      install_command: "{{ coolify_application_install_command | default(omit, true) }}"
+      build_command: "{{ coolify_application_build_command | default(omit, true) }}"
+      start_command: "{{ coolify_application_start_command | default(omit, true) }}"
+      ports_mappings: "{{ coolify_application_ports_mappings | default(omit, true) }}"
+      base_directory: "{{ coolify_application_base_directory | default(omit, true) }}"
+      publish_directory: "{{ coolify_application_publish_directory | default(omit, true) }}"
       health_check_enabled: "{{ coolify_application_health_check_enabled | default(true) }}"
-      health_check_path: "{{ coolify_application_health_check_path | default(omit) }}"
+      health_check_path: "{{ coolify_application_health_check_path | default(omit, true) }}"
       instant_deploy: "{{ coolify_application_instant_deploy }}"
       use_build_server: "{{ coolify_application_use_build_server }}"
       connect_to_docker_network: "{{ coolify_application_connect_to_docker_network }}"
@@ -70,7 +70,23 @@
 
 - name: Set Application UUID fact
   ansible.builtin.set_fact:
-    coolify_application_uuid: "{{ (create_docker_compose_result.json.uuid if coolify_application_type == 'dockercompose' else create_private_key_result.json.uuid) }}"
+    coolify_application_uuid: "{{ (create_docker_compose_result.json.uuid if (coolify_application_type == 'dockercompose' and create_docker_compose_result.json is defined) else (create_private_key_result.json.uuid if create_private_key_result.json is defined else '')) }}"
+
+- name: Update Application Name and Configuration (Ensure correctness)
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/applications/{{ coolify_application_uuid }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ coolify_application_name | default(omit, true) }}"
+      description: "{{ coolify_application_description | default(omit, true) }}"
+      domains: "{{ coolify_application_domains | default(omit, true) }}"
+      docker_compose_raw: "{{ (coolify_application_docker_compose_raw | b64encode) if (coolify_application_docker_compose_raw | default('', true) | length > 0) else omit }}"
+    status_code: [200, 201]
+  when: coolify_application_uuid is defined and coolify_application_uuid != ""
 
 - name: Add Environment Variables
   ansible.builtin.uri:

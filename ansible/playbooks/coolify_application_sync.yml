@@ -1,84 +1,91 @@
 ---
-- name: Fetch Applications from Development
+- name: Fetch Applications from Source
   hosts: controller
   become: true
+  vars:
+    coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+    # Defaults to syncing from dev to prod
+    source_controller: "{{ coolify_source_controller | default('vm-controller') }}"
+    target_controller: "{{ coolify_target_controller | default('noc.host.uk.com') }}"
   tasks:
-    - name: Get API Token from Development
+    - name: Get API Token from Source
       ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
-      when: inventory_hostname == 'vm-controller'
+      when: inventory_hostname == source_controller
 
     - name: Fetch Applications
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/applications"
+        url: "{{ coolify_api_base_url }}/applications"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
-      register: dev_apps
-      when: inventory_hostname == 'vm-controller'
+      register: source_apps
+      when: inventory_hostname == source_controller
 
     - name: Fetch Services
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/services"
+        url: "{{ coolify_api_base_url }}/services"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
-      register: dev_services
-      when: inventory_hostname == 'vm-controller'
+      register: source_services
+      when: inventory_hostname == source_controller
 
     - name: Fetch Databases
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/databases"
+        url: "{{ coolify_api_base_url }}/databases"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
-      register: dev_databases
-      when: inventory_hostname == 'vm-controller'
+      register: source_databases
+      when: inventory_hostname == source_controller
 
     - name: Fetch Projects
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/projects"
+        url: "{{ coolify_api_base_url }}/projects"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
-      register: dev_projects
-      when: inventory_hostname == 'vm-controller'
+      register: source_projects
+      when: inventory_hostname == source_controller
 
     - name: Fetch Servers
       ansible.builtin.uri:
-        url: "http://localhost:8000/api/v1/servers"
+        url: "{{ coolify_api_base_url }}/servers"
         method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
-      register: dev_servers
-      when: inventory_hostname == 'vm-controller'
+      register: source_servers
+      when: inventory_hostname == source_controller
 
     - name: Save Data to local fact
       ansible.builtin.set_fact:
-        global_dev_apps: "{{ dev_apps.json if dev_apps.json is defined else [] }}"
-        global_dev_services: "{{ dev_services.json if dev_services.json is defined else [] }}"
-        global_dev_databases: "{{ dev_databases.json if dev_databases.json is defined else [] }}"
-        global_dev_projects: "{{ dev_projects.json if dev_projects.json is defined else [] }}"
-        global_dev_servers: "{{ dev_servers.json if dev_servers.json is defined else [] }}"
+        global_source_apps: "{{ source_apps.json if source_apps.json is defined else [] }}"
+        global_source_services: "{{ source_services.json if source_services.json is defined else [] }}"
+        global_source_databases: "{{ source_databases.json if source_databases.json is defined else [] }}"
+        global_source_projects: "{{ source_projects.json if source_projects.json is defined else [] }}"
+        global_source_servers: "{{ source_servers.json if source_servers.json is defined else [] }}"
       delegate_to: localhost
       delegate_facts: true
-      when: inventory_hostname == 'vm-controller'
+      when: inventory_hostname == source_controller
 
-- name: Sync to Production
+- name: Sync to Target
   hosts: controller
   become: true
+  vars:
+    source_controller: "{{ coolify_source_controller | default('vm-controller') }}"
+    target_controller: "{{ coolify_target_controller | default('noc.host.uk.com') }}"
   tasks:
-    - name: Skip if not production controller
+    - name: Skip if not target controller
       ansible.builtin.meta: end_host
-      when: inventory_hostname != 'noc.host.uk.com'
+      when: inventory_hostname != target_controller
 
-    - name: Get API Token from Production
+    - name: Get API Token from Target
       ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
 
-    - name: Process and Create Applications on Production
+    - name: Process and Create Applications on Target
       ansible.builtin.include_role:
         name: coolify-application
       vars:
-        coolify_api_token: "{{ coolify_api_token }}"
         coolify_application_type: "{{ 'dockercompose' if item.build_pack == 'dockercompose' else 'private-deploy-key' }}"
         coolify_application_project_uuid: "FIXME_PROJECT_UUID"
         coolify_application_server_uuid: "FIXME_SERVER_UUID"
@@ -87,16 +94,15 @@
         coolify_application_docker_compose_raw: "{{ item.docker_compose_raw | default('') }}"
         coolify_application_git_repository: "{{ item.git_repository | default('') }}"
         coolify_application_git_branch: "{{ item.git_branch | default('') }}"
-      loop: "{{ hostvars['localhost']['global_dev_apps'] }}"
-      when: hostvars['localhost']['global_dev_apps'] is defined and hostvars['localhost']['global_dev_apps'] | length > 0
+      loop: "{{ hostvars['localhost']['global_source_apps'] }}"
+      when: hostvars['localhost']['global_source_apps'] is defined and hostvars['localhost']['global_source_apps'] | length > 0
       loop_control:
         label: "App: {{ item.name }}"
 
-    - name: Process and Create Services on Production
+    - name: Process and Create Services on Target
       ansible.builtin.include_role:
         name: coolify-service
       vars:
-        coolify_api_token: "{{ coolify_api_token }}"
         coolify_service_type: "{{ item.service_type }}"
         coolify_service_project_uuid: "FIXME_PROJECT_UUID"
         coolify_service_server_uuid: "FIXME_SERVER_UUID"
@@ -104,16 +110,15 @@
         coolify_service_name: "{{ item.name }}"
         coolify_service_description: "{{ item.description | default('') }}"
         coolify_service_docker_compose_raw: "{{ item.docker_compose_raw | default('') }}"
-      loop: "{{ hostvars['localhost']['global_dev_services'] }}"
-      when: hostvars['localhost']['global_dev_services'] is defined and hostvars['localhost']['global_dev_services'] | length > 0
+      loop: "{{ hostvars['localhost']['global_source_services'] }}"
+      when: hostvars['localhost']['global_source_services'] is defined and hostvars['localhost']['global_source_services'] | length > 0
       loop_control:
         label: "Service: {{ item.name }}"
 
-    - name: Process and Create Databases on Production
+    - name: Process and Create Databases on Target
       ansible.builtin.include_role:
         name: coolify-database
       vars:
-        coolify_api_token: "{{ coolify_api_token }}"
         # Extract database type from image or tags if not explicitly provided
         coolify_database_type: "{{ item.type | default('postgresql') }}"
         coolify_database_body:
@@ -124,7 +129,7 @@
           description: "{{ item.description | default('') }}"
           instant_deploy: true
           # Add more fields as needed, these are the common ones
-      loop: "{{ hostvars['localhost']['global_dev_databases'] }}"
-      when: hostvars['localhost']['global_dev_databases'] is defined and hostvars['localhost']['global_dev_databases'] | length > 0
+      loop: "{{ hostvars['localhost']['global_source_databases'] }}"
+      when: hostvars['localhost']['global_source_databases'] is defined and hostvars['localhost']['global_source_databases'] | length > 0
       loop_control:
         label: "DB: {{ item.name }}"

@@ -13,4 +13,18 @@
 
 - name: Set Database UUID fact
   ansible.builtin.set_fact:
-    coolify_database_uuid: "{{ create_database_result.json.uuid if create_database_result.json is defined else '' }}"
+    coolify_database_uuid: "{{ create_database_result.json.uuid if (create_database_result.json is defined and create_database_result.json.uuid is defined) else '' }}"
+
+- name: Update Database Name and Configuration (Ensure correctness)
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/databases/{{ coolify_database_uuid }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ coolify_database_body.name | default(omit, true) }}"
+      description: "{{ coolify_database_body.description | default(omit, true) }}"
+    status_code: [200, 201]
+  when: coolify_database_uuid is defined and coolify_database_uuid != ""

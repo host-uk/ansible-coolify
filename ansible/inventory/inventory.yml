@@ -63,9 +63,6 @@ all:
       hosts:
         noc.host.uk.com:
         vm-controller:
-        localhost:
-          ansible_connection: local
-          ansible_become: false
     worker:
       hosts:
         de.host.uk.com:

@@ -1,0 +1,49 @@
+---
+- name: "Clone Service: {{ service_item.name }}"
+  block:
+    - name: "Fetch Full Details for Service: {{ service_item.uuid }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services/{{ service_item.uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: service_details
+
+    - name: "Fetch Envs for Service: {{ service_item.uuid }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services/{{ service_item.uuid }}/envs"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: service_envs
+
+    - name: "Set Service Base Name fact"
+      ansible.builtin.set_fact:
+        # Extract base name by removing the source environment suffix if present
+        service_base_name: "{{ service_details.json.name | replace('.' + source_env_actual_name, '') }}"
+
+    - name: "Create Clone of Service: {{ service_item.name }}"
+      ansible.builtin.include_role:
+        name: coolify-service
+      vars:
+        coolify_service_project_uuid: "{{ project_uuid }}"
+        coolify_service_environment_name: "{{ target_env_name }}"
+        coolify_service_name: "{{ service_base_name }}.{{ target_env_name }}"
+        coolify_service_description: "{{ service_details.json.description | default('') }}"
+        coolify_service_type: "{{ service_details.json.service_type | default('') }}"
+        coolify_service_server_uuid: "{{ service_details.json.server.uuid if (service_details.json.server is defined) else '' }}"
+        coolify_service_destination_uuid: "{{ service_details.json.destination.uuid if service_details.json.destination is defined else '' }}"
+        # Replacement for environment names in docker_compose_raw
+        coolify_service_docker_compose_raw: "{{ service_details.json.docker_compose_raw | default('') | replace(source_env_actual_name, target_env_name) }}"
+        coolify_service_instant_deploy: false
+        # Construct service domains fact for logging/reference
+        coolify_service_domains: "{{ service_base_name }}.host.uk.com,{{ service_base_name }}.{{ target_region }}.host.uk.com"
+        coolify_service_envs: "{{ service_envs.json | to_json | replace(source_env_actual_name, target_env_name) | from_json }}"
+
+    - name: "Start Service: {{ service_item.name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services/{{ coolify_service_uuid }}/start"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      when: coolify_service_uuid is defined and coolify_service_uuid != ""

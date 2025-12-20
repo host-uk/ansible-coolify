@@ -1,0 +1,53 @@
+---
+- name: "Clone Application: {{ app_item.name }}"
+  block:
+    - name: "Fetch Full Details for App: {{ app_item.name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/applications/{{ app_item.uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: app_details
+
+    - name: "Fetch Envs for App: {{ app_item.name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/applications/{{ app_item.uuid }}/envs"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: app_envs
+
+    - name: "Set Base Name and Region facts"
+      ansible.builtin.set_fact:
+        # Extract base name by removing the source environment suffix if present
+        app_base_name: "{{ app_details.json.name | replace('.' + source_env_actual_name, '') }}"
+
+    - name: "Create Clone of App: {{ app_item.name }}"
+      ansible.builtin.include_role:
+        name: coolify-application
+      vars:
+        coolify_application_state: create
+        coolify_application_project_uuid: "{{ project_uuid }}"
+        coolify_application_environment_name: "{{ target_env_name }}"
+        coolify_application_name: "{{ app_base_name }}.{{ target_env_name }}"
+        coolify_application_description: "{{ app_details.json.description | default('') }}"
+        coolify_application_type: "{{ 'dockercompose' if app_details.json.build_pack == 'dockercompose' else 'private-deploy-key' }}"
+        coolify_application_docker_compose_raw: "{{ app_details.json.docker_compose_raw | default('') | replace(source_env_actual_name, target_env_name) }}"
+        coolify_application_git_repository: "{{ app_details.json.git_repository | default('') }}"
+        coolify_application_git_branch: "{{ app_details.json.git_branch | default('') }}"
+        coolify_application_build_pack: "{{ app_details.json.build_pack }}"
+        coolify_application_ports_exposes: "{{ app_details.json.ports_exposes }}"
+        coolify_application_server_uuid: "{{ app_details.json.destination.server.uuid if (app_details.json.destination is defined and app_details.json.destination.server is defined) else '' }}"
+        coolify_application_destination_uuid: "{{ app_details.json.destination.uuid if app_details.json.destination is defined else '' }}"
+        coolify_application_private_key_uuid: "{{ app_details.json.private_key.uuid if app_details.json.private_key is defined else '' }}"
+        coolify_application_instant_deploy: false
+        coolify_application_domains: "{{ app_base_name }}.host.uk.com,{{ app_base_name }}.{{ target_region }}.host.uk.com"
+        coolify_application_envs: "{{ app_envs.json | to_json | replace(source_env_actual_name, target_env_name) | from_json }}"
+
+    - name: "Start Application: {{ app_item.name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/applications/{{ coolify_application_uuid }}/start"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      when: coolify_application_uuid is defined and coolify_application_uuid != ""

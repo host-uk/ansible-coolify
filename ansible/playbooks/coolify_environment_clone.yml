@@ -1,0 +1,143 @@
+---
+- name: Backup and Clone Coolify Environment
+  hosts: controller
+  become: true
+  vars:
+    # Default project UUID
+    project_uuid: "{{ coolify_project_uuid | default('') }}"
+    # Environment names should be passed as extra vars
+    source_env_name: "{{ coolify_source_env_name | default('') }}"
+    target_env_name: "{{ coolify_target_env_name | default('') }}"
+    # Use inventory_hostname to ensure we talk to the correct controller
+    coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
+
+  tasks:
+    - name: Validate mandatory variables
+      ansible.builtin.fail:
+        msg: "Mandatory variables 'source_env_name', 'target_env_name' and 'coolify_project_uuid' (project name or UUID) are required. Please provide them via EXTRA_VARS."
+      when: source_env_name == "" or target_env_name == "" or project_uuid == ""
+
+    - name: Setup Coolify API and Token
+      ansible.builtin.include_tasks: roles/coolify/tasks/api_setup.yml
+
+    - name: List All Projects
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_projects
+
+    - name: Resolve Project UUID
+      ansible.builtin.set_fact:
+        # Try to find project by UUID first, then by Name
+        resolved_project: "{{ all_projects.json | selectattr('uuid', 'equalto', project_uuid) | first | default(all_projects.json | selectattr('name', 'equalto', project_uuid) | first | default(none)) }}"
+
+    - name: Fail if Project not found
+      ansible.builtin.fail:
+        msg: "Project '{{ project_uuid }}' not found. Available projects: {{ all_projects.json | map(attribute='name') | list }}"
+      when: resolved_project is none
+
+    - name: Set Project UUID and Region facts
+      ansible.builtin.set_fact:
+        project_uuid: "{{ resolved_project.uuid }}"
+        target_region: "{{ target_env_name.split('.') | first }}"
+
+    - name: Get Full Project Details
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: project_details
+
+    - name: Find Source and Target Environments
+      ansible.builtin.set_fact:
+        # Match by name or UUID
+        source_env: "{{ project_details.json.environments | selectattr('name', 'equalto', source_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', source_env_name) | first | default(none)) }}"
+        target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', target_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', target_env_name) | first | default(none)) }}"
+
+    - name: Debug Resolved Info
+      ansible.builtin.debug:
+        msg:
+          - "Project: {{ resolved_project.name }} ({{ project_uuid }})"
+          - "Source Env: {{ source_env.name if source_env else 'NOT FOUND' }} ({{ source_env_name }})"
+          - "Target Env: {{ target_env.name if target_env else 'TO BE CREATED' }} ({{ target_env_name }})"
+
+    - name: Fail if Source Environment not found
+      ansible.builtin.fail:
+        msg: "Source environment '{{ source_env_name }}' not found in project {{ resolved_project.name }} ({{ project_uuid }})"
+      when: source_env is none
+
+    - name: Create Target Environment if not exists
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ project_uuid }}/environments"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ target_env_name }}"
+        status_code: [201, 409]
+      register: create_env_result
+      when: target_env is none
+
+    - name: Fetch All Applications
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/applications"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_apps
+
+    - name: Filter Applications for Source Environment
+      ansible.builtin.set_fact:
+        source_apps: "{{ all_apps.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
+
+    - name: Clone Applications
+      ansible.builtin.include_tasks: tasks/clone_application.yml
+      loop: "{{ source_apps }}"
+      loop_control:
+        loop_var: app_item
+
+    - name: Fetch All Services
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_services
+
+    - name: Filter Services for Source Environment
+      ansible.builtin.set_fact:
+        source_services: "{{ all_services.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
+
+    - name: Clone Services
+      ansible.builtin.include_tasks: tasks/clone_service.yml
+      loop: "{{ source_services }}"
+      loop_control:
+        loop_var: service_item
+
+    - name: Fetch All Databases
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+      register: all_databases
+
+    - name: Filter Databases for Source Environment
+      ansible.builtin.set_fact:
+        source_databases: "{{ all_databases.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
+      when: all_databases.json is defined and all_databases.json is iterable
+
+    - name: Clone Databases
+      ansible.builtin.include_tasks: tasks/clone_database.yml
+      loop: "{{ source_databases | default([]) }}"
+      loop_control:
+        loop_var: db_item
+
+    - name: Environment Clone Completed
+      ansible.builtin.debug:
+        msg: "Successfully cloned environment '{{ source_env_name }}' to '{{ target_env_name }}' in project '{{ project_uuid }}'."

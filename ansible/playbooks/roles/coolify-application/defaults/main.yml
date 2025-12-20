@@ -1,5 +1,5 @@
 ---
-coolify_api_base_url: "http://localhost:8000/api/v1"
+coolify_api_base_url: "http://{{ inventory_hostname }}:8000/api/v1"
 coolify_application_project_uuid: ""
 coolify_application_server_uuid: ""
 coolify_application_environment_name: "main"
