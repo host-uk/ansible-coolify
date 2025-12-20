@@ -9,43 +9,87 @@
           Authorization: "Bearer {{ coolify_api_token }}"
       register: db_details
 
-    - name: "Set Database Base Name fact"
+    - name: "Set Database Type and Base Name facts"
       ansible.builtin.set_fact:
-        # Extract base name by removing the source environment suffix if present
-        db_base_name: "{{ db_details.json.name | default(db_item.name) | replace('.' + source_env_actual_name, '') }}"
+        # Extract base name by removing the source environment and project name suffixes if present
+        db_base_name: "{{ db_details.json.name | default(db_item.name) | replace('.' + source_env_actual_name, '') | replace('.' + resolved_project.name, '') }}"
+        # Determine database type by checking available fields or the type field
+        resolved_db_type: >-
+          {% if db_details.json.mariadb_user is defined or db_details.json.type == 'mariadb' %}mariadb
+          {% elif db_details.json.postgres_user is defined or db_details.json.type == 'postgresql' %}postgresql
+          {% elif db_details.json.mysql_user is defined or db_details.json.type == 'mysql' %}mysql
+          {% elif db_details.json.redis_password is defined or db_details.json.type == 'redis' %}redis
+          {% elif db_details.json.mongo_initdb_root_username is defined or db_details.json.type == 'mongodb' %}mongodb
+          {% elif db_details.json.dragonfly_password is defined or db_details.json.type == 'dragonfly' %}dragonfly
+          {% elif db_details.json.keydb_password is defined or db_details.json.type == 'keydb' %}keydb
+          {% elif db_details.json.clickhouse_admin_user is defined or db_details.json.type == 'clickhouse' %}clickhouse
+          {% else %}{{ db_details.json.type | default(db_item.type | default('postgresql'), true) }}{% endif %}
 
     - name: "Create Clone of Database: {{ db_item.name }}"
       ansible.builtin.include_role:
         name: coolify-database
       vars:
         coolify_database_state: create
-        # Use type from full details if available, otherwise from item
-        coolify_database_type: "{{ db_details.json.type | default(db_item.type | default('postgresql')) }}"
-        coolify_database_body:
-          project_uuid: "{{ project_uuid }}"
-          server_uuid: "{{ db_details.json.server.uuid if (db_details.json.server is defined) else (db_item.server.uuid if db_item.server is defined else '') }}"
-          environment_name: "{{ target_env_name }}"
-          name: "{{ db_base_name }}.{{ target_env_name }}"
-          description: "{{ db_details.json.description | default(db_item.description | default('')) }}"
-          instant_deploy: true
-          # Common fields for various DB types
-          postgres_user: "{{ db_details.json.postgres_user | default(omit) }}"
-          postgres_password: "{{ db_details.json.postgres_password | default(omit) }}"
-          postgres_db: "{{ db_details.json.postgres_db | default(omit) }}"
-          mysql_user: "{{ db_details.json.mysql_user | default(omit) }}"
-          mysql_password: "{{ db_details.json.mysql_password | default(omit) }}"
-          mysql_database: "{{ db_details.json.mysql_database | default(omit) }}"
-          mysql_root_password: "{{ db_details.json.mysql_root_password | default(omit) }}"
-          mariadb_user: "{{ db_details.json.mariadb_user | default(omit) }}"
-          mariadb_password: "{{ db_details.json.mariadb_password | default(omit) }}"
-          mariadb_database: "{{ db_details.json.mariadb_database | default(omit) }}"
-          mariadb_root_password: "{{ db_details.json.mariadb_root_password | default(omit) }}"
-          mongodb_user: "{{ db_details.json.mongodb_user | default(omit) }}"
-          mongodb_password: "{{ db_details.json.mongodb_password | default(omit) }}"
-          redis_password: "{{ db_details.json.redis_password | default(omit) }}"
-          image: "{{ db_details.json.image | default(omit) }}"
-          is_public: "{{ db_details.json.is_public | default(omit) }}"
-          public_port: "{{ db_details.json.public_port | default(omit) }}"
+        coolify_database_type: "{{ resolved_db_type }}"
+        coolify_database_body: >-
+          {{
+            {
+              'project_uuid': project_uuid,
+              'server_uuid': (db_details.json.server.uuid if (db_details.json.server is defined and db_details.json.server.uuid is defined) else (db_details.json.destination.server.uuid if (db_details.json.destination is defined and db_details.json.destination.server is defined) else (db_item.server.uuid if (db_item.server is defined and db_item.server.uuid is defined) else ''))),
+              'environment_name': target_env_name,
+              'name': db_details.json.name | default(db_item.name) | replace(source_env_actual_name, target_env_name),
+              'description': db_details.json.description | default(db_item.description | default('')),
+              'instant_deploy': true,
+              'image': db_details.json.image | default(none),
+              'is_public': db_details.json.is_public | default(none),
+              'public_port': db_details.json.public_port | default(none)
+            } | combine(
+              (resolved_db_type == 'postgresql') | ternary({
+                'postgres_user': db_details.json.postgres_user | default(none),
+                'postgres_password': db_details.json.postgres_password | default(none),
+                'postgres_db': db_details.json.postgres_db | default(none),
+                'postgres_conf': db_details.json.postgres_conf | default(none),
+                'postgres_initdb_args': db_details.json.postgres_initdb_args | default(none),
+                'postgres_host_auth_method': db_details.json.postgres_host_auth_method | default(none)
+              }, {}),
+              (resolved_db_type == 'mariadb') | ternary({
+                'mariadb_user': db_details.json.mariadb_user | default(none),
+                'mariadb_password': db_details.json.mariadb_password | default(none),
+                'mariadb_database': db_details.json.mariadb_database | default(none),
+                'mariadb_root_password': db_details.json.mariadb_root_password | default(none),
+                'mariadb_conf': db_details.json.mariadb_conf | default(none)
+              }, {}),
+              (resolved_db_type == 'mysql') | ternary({
+                'mysql_user': db_details.json.mysql_user | default(none),
+                'mysql_password': db_details.json.mysql_password | default(none),
+                'mysql_database': db_details.json.mysql_database | default(none),
+                'mysql_root_password': db_details.json.mysql_root_password | default(none),
+                'mysql_conf': db_details.json.mysql_conf | default(none)
+              }, {}),
+              (resolved_db_type == 'redis') | ternary({
+                'redis_password': db_details.json.redis_password | default(none),
+                'redis_conf': db_details.json.redis_conf | default(none)
+              }, {}),
+              (resolved_db_type == 'mongodb') | ternary({
+                'mongo_initdb_root_username': db_details.json.mongo_initdb_root_username | default(none),
+                'mongo_initdb_root_password': db_details.json.mongo_initdb_root_password | default(none),
+                'mongo_initdb_database': db_details.json.mongo_initdb_database | default(none),
+                'mongo_conf': db_details.json.mongo_conf | default(none)
+              }, {}),
+              (resolved_db_type == 'dragonfly') | ternary({
+                'dragonfly_password': db_details.json.dragonfly_password | default(none)
+              }, {}),
+              (resolved_db_type == 'keydb') | ternary({
+                'keydb_password': db_details.json.keydb_password | default(none),
+                'keydb_conf': db_details.json.keydb_conf | default(none)
+              }, {}),
+              (resolved_db_type == 'clickhouse') | ternary({
+                'clickhouse_admin_user': db_details.json.clickhouse_admin_user | default(none),
+                'clickhouse_admin_password': db_details.json.clickhouse_admin_password | default(none)
+              }, {}),
+              recursive=True
+            )
+          }}
 
     - name: "Start Database: {{ db_item.name }}"
       ansible.builtin.uri:

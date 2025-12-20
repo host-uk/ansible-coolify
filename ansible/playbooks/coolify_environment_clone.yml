@@ -57,6 +57,11 @@
         source_env: "{{ project_details.json.environments | selectattr('name', 'equalto', source_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', source_env_name) | first | default(none)) }}"
         target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', target_env_name) | first | default(project_details.json.environments | selectattr('uuid', 'equalto', target_env_name) | first | default(none)) }}"
 
+    - name: Set Source Environment Actual Name fact
+      ansible.builtin.set_fact:
+        source_env_actual_name: "{{ source_env.name }}"
+      when: source_env is not none
+
     - name: Debug Resolved Info
       ansible.builtin.debug:
         msg:

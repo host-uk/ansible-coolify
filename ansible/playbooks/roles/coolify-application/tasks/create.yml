@@ -88,7 +88,17 @@
     status_code: [200, 201]
   when: coolify_application_uuid is defined and coolify_application_uuid != ""
 
-- name: Add Environment Variables
+- name: Get Existing Application Environment Variables
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/applications/{{ coolify_application_uuid }}/envs"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: [200]
+  register: existing_app_envs
+  when: coolify_application_uuid is defined and coolify_application_uuid != ""
+
+- name: Add Application Environment Variables (New)
   ansible.builtin.uri:
     url: "{{ coolify_api_base_url }}/applications/{{ coolify_application_uuid }}/envs"
     method: POST
@@ -105,4 +115,29 @@
       is_shown_once: "{{ item.is_shown_once | default(false) }}"
     status_code: [200, 201]
   loop: "{{ coolify_application_envs | default([]) }}"
-  when: coolify_application_uuid is defined and coolify_application_uuid != ""
+  when: 
+    - coolify_application_uuid is defined and coolify_application_uuid != ""
+    - existing_app_envs.json is defined
+    - item.key not in (existing_app_envs.json | map(attribute='key') | list)
+
+- name: Update Application Environment Variables (Existing)
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/applications/{{ coolify_application_uuid }}/envs"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      key: "{{ item.key }}"
+      value: "{{ item.value }}"
+      is_preview: "{{ item.is_preview | default(false) }}"
+      is_literal: "{{ item.is_literal | default(false) }}"
+      is_multiline: "{{ item.is_multiline | default(false) }}"
+      is_shown_once: "{{ item.is_shown_once | default(false) }}"
+    status_code: [200, 201]
+  loop: "{{ coolify_application_envs | default([]) }}"
+  when: 
+    - coolify_application_uuid is defined and coolify_application_uuid != ""
+    - existing_app_envs.json is defined
+    - item.key in (existing_app_envs.json | map(attribute='key') | list)

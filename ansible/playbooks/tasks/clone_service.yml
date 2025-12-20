@@ -19,8 +19,8 @@
 
     - name: "Set Service Base Name fact"
       ansible.builtin.set_fact:
-        # Extract base name by removing the source environment suffix if present
-        service_base_name: "{{ service_details.json.name | replace('.' + source_env_actual_name, '') }}"
+        # Extract base name by removing the source environment and project name suffixes if present
+        service_base_name: "{{ service_details.json.name | replace('.' + source_env_actual_name, '') | replace('.' + resolved_project.name, '') }}"
 
     - name: "Create Clone of Service: {{ service_item.name }}"
       ansible.builtin.include_role:
@@ -28,7 +28,8 @@
       vars:
         coolify_service_project_uuid: "{{ project_uuid }}"
         coolify_service_environment_name: "{{ target_env_name }}"
-        coolify_service_name: "{{ service_base_name }}.{{ target_env_name }}"
+        # If the original name contained the environment name, replace it. Otherwise keep it as is.
+        coolify_service_name: "{{ service_details.json.name | replace(source_env_actual_name, target_env_name) }}"
         coolify_service_description: "{{ service_details.json.description | default('') }}"
         coolify_service_type: "{{ service_details.json.service_type | default('') }}"
         coolify_service_server_uuid: "{{ service_details.json.server.uuid if (service_details.json.server is defined) else '' }}"

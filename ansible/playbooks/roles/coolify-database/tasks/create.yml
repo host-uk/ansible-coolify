@@ -7,7 +7,8 @@
       Authorization: "Bearer {{ coolify_api_token }}"
       Content-Type: "application/json"
     body_format: json
-    body: "{{ coolify_database_body }}"
+    # Filter out null values and the omit placeholder from the body
+    body: "{{ coolify_database_body | dict2items | rejectattr('value', 'undefined') | rejectattr('value', 'none') | list | items2dict }}"
     status_code: [200, 201]
   register: create_database_result
 

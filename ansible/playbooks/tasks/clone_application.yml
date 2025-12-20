@@ -19,8 +19,8 @@
 
     - name: "Set Base Name and Region facts"
       ansible.builtin.set_fact:
-        # Extract base name by removing the source environment suffix if present
-        app_base_name: "{{ app_details.json.name | replace('.' + source_env_actual_name, '') }}"
+        # Extract base name by removing the source environment and project name suffixes if present
+        app_base_name: "{{ app_details.json.name | replace('.' + source_env_actual_name, '') | replace('.' + resolved_project.name, '') }}"
 
     - name: "Create Clone of App: {{ app_item.name }}"
       ansible.builtin.include_role:
@@ -29,7 +29,8 @@
         coolify_application_state: create
         coolify_application_project_uuid: "{{ project_uuid }}"
         coolify_application_environment_name: "{{ target_env_name }}"
-        coolify_application_name: "{{ app_base_name }}.{{ target_env_name }}"
+        # If the original name contained the environment name, replace it. Otherwise keep it as is.
+        coolify_application_name: "{{ app_details.json.name | replace(source_env_actual_name, target_env_name) }}"
         coolify_application_description: "{{ app_details.json.description | default('') }}"
         coolify_application_type: "{{ 'dockercompose' if app_details.json.build_pack == 'dockercompose' else 'private-deploy-key' }}"
         coolify_application_docker_compose_raw: "{{ app_details.json.docker_compose_raw | default('') | replace(source_env_actual_name, target_env_name) }}"
