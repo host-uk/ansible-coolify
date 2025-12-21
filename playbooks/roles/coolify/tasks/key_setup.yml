@@ -6,7 +6,9 @@
     headers:
       Authorization: "Bearer {{ coolify_api_token }}"
   register: keys_list
-  when: not ansible_check_mode
+  when: 
+    - not ansible_check_mode
+    - coolify_api_token | default('') != ''
   ignore_errors: true
 
 - name: Find existing key UUID by name ({{ coolify_key_name }})
@@ -152,6 +154,7 @@
               private_key: "{{ coolify_private_key_content }}"
             status_code: [201]
           register: create_key_result
+          when: coolify_api_token | default('') != ''
       when: 
         - coolify_private_key_content is defined
         - coolify_private_key_content.startswith('-----BEGIN')
@@ -187,6 +190,7 @@
   register: keys_list_after_create
   when: 
     - not ansible_check_mode
+    - coolify_api_token | default('') != ''
     - create_key_result is defined
     - create_key_result is changed
     - coolify_public_key == ""

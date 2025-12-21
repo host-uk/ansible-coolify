@@ -73,10 +73,10 @@
     docker exec coolify php artisan tinker --execute='
     try {
         // 1. Ensure Private Key exists in DB
-        $privateKey = \App\Models\PrivateKey::where("name", "{{ inventory_hostname }}")->first();
+        $privateKey = \App\Models\PrivateKey::where("name", "host.docker.internal")->first();
         if (!$privateKey) {
             $privateKey = \App\Models\PrivateKey::create([
-                "name" => "{{ inventory_hostname }}",
+                "name" => "host.docker.internal",
                 "description" => "Initial identity key",
                 "private_key" => <<<'EOF'
     {{ coolify_priv_key_slurp.content | b64decode | trim }}
@@ -85,10 +85,10 @@
         }
 
         // 2. Ensure Localhost Server exists in DB
-        $server = \App\Models\Server::where("ip", "127.0.0.1")->orWhere("name", "localhost")->first();
+        $server = \App\Models\Server::where("ip", "127.0.0.1")->orWhere("name", "host.docker.internal")->first();
         if (!$server) {
             $server = \App\Models\Server::create([
-                "name" => "localhost",
+                "name" => "host.docker.internal",
                 "ip" => "127.0.0.1",
                 "user" => "root",
                 "port" => 22,
@@ -97,6 +97,7 @@
                 "proxy_type" => "traefik",
             ]);
         } else {
+            $server->name = "host.docker.internal";
             $server->private_key_id = $privateKey->id;
             $server->save();
         }

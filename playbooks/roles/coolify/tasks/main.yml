@@ -101,7 +101,7 @@
 - name: Setup Private Key (BETA)
   ansible.builtin.include_tasks: key_setup.yml
   vars:
-    coolify_key_name: "{{ inventory_hostname }}"
+    coolify_key_name: "host.docker.internal"
     coolify_save_to_state: true
   when: 
     - coolify_auto_setup_enabled | default(false) | bool
@@ -133,3 +133,5 @@
         - coolify_generated_pub_key is success
         - coolify_generated_pub_key.content is defined
       run_once: true
+  when: 
+    - coolify_auto_setup_enabled | default(false) | bool

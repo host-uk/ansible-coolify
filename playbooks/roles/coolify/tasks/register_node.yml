@@ -7,12 +7,17 @@
         current_node_ip: "{{ hostvars[node_name]['private_ip'] | default(hostvars[node_name]['ansible_host'], true) | default(node_name, true) }}"
         current_node_key_path: "{{ hostvars[node_name]['ansible_ssh_private_key_file'] | default(coolify_private_key_path) }}"
 
+    - name: Skip registration if this is the controller (localhost/host.docker.internal)
+      ansible.builtin.meta: noop
+      when: current_node_ip == '127.0.0.1' or current_node_hostname == 'host.docker.internal' or node_name == inventory_hostname
+
     - name: Ensure key is registered in Coolify for {{ node_name }}
       ansible.builtin.include_tasks: key_setup.yml
       vars:
         coolify_key_name: "{{ node_name }}"
         coolify_private_key_path: "{{ current_node_key_path }}"
         coolify_save_to_state: true
+      when: not (current_node_ip == '127.0.0.1' or current_node_hostname == 'host.docker.internal' or node_name == inventory_hostname)
 
     - name: Add Node IP to Coolify Allowed IPs
       ansible.builtin.shell: |
@@ -36,7 +41,9 @@
         '
       register: ip_add_result
       changed_when: "'IP_ADDED' in ip_add_result.stdout"
-      when: not ansible_check_mode
+      when: 
+        - not ansible_check_mode
+        - not (current_node_ip == '127.0.0.1' or current_node_hostname == 'host.docker.internal' or node_name == inventory_hostname)
       no_log: true
 
     - name: Add Coolify public key to node authorized_keys
@@ -49,6 +56,7 @@
         - not ansible_check_mode
         - coolify_public_key is defined
         - coolify_public_key != ""
+        - not (current_node_ip == '127.0.0.1' or current_node_hostname == 'host.docker.internal' or node_name == inventory_hostname)
 
     - name: Get current servers from Coolify
       ansible.builtin.uri:
@@ -57,7 +65,10 @@
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
       register: servers_list
-      when: not ansible_check_mode
+      when: 
+        - not ansible_check_mode
+        - coolify_api_token | default('') != ''
+        - not (current_node_ip == '127.0.0.1' or current_node_hostname == 'host.docker.internal' or node_name == inventory_hostname)
       ignore_errors: true
 
     - name: Post server registration to Coolify
@@ -81,7 +92,9 @@
         status_code: [200, 201]
       when: 
         - not ansible_check_mode
+        - coolify_api_token | default('') != ''
         - servers_list is success
         - servers_list.json is defined
         - servers_list.json | type_debug == 'list'
         - servers_list.json | selectattr('name', 'equalto', current_node_hostname) | list | length == 0
+        - not (current_node_ip == '127.0.0.1' or current_node_hostname == 'host.docker.internal' or node_name == inventory_hostname)
