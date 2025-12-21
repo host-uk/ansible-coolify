@@ -28,8 +28,11 @@ coolify_server_ip: "{{ hostvars[coolify_server_name]['private_ip'] | default(hos
 coolify_private_key_path: ""
 coolify_key_name: "{{ inventory_hostname }}"
 
+# BETA/EXPERIMENTAL: Automatic API setup and node registration
+coolify_auto_setup_enabled: false
+
 # API settings
-coolify_api_base_url: "http://127.0.0.1:8000/api/v1"
+coolify_api_base_url: "http://{{ ansible_host }}:8000/api/v1"
 
 # State path (relative to inventory)
 coolify_state_path: "{{ inventory_dir }}/../state"

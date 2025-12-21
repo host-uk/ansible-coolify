@@ -216,6 +216,20 @@
     - coolify_public_key != ""
     - coolify_state_path != ""
 
+- name: Save Coolify private key to local state folder
+  ansible.builtin.copy:
+    content: "{{ coolify_private_key_content }}"
+    dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify/{{ coolify_key_name }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  when:
+    - not ansible_check_mode
+    - coolify_private_key_content is defined
+    - coolify_private_key_content != ""
+    - coolify_state_path != ""
+    - coolify_save_to_state | default(false) | bool
+
 - name: Debug key info
   ansible.builtin.debug:
     msg: "Using Private Key UUID: {{ coolify_key_uuid }} with Public Key: {{ coolify_public_key | default('NOT FOUND') }}"

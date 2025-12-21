@@ -1,15 +1,64 @@
 ---
-- name: Check if API token is already saved on host
-  ansible.builtin.stat:
-    path: /data/coolify/ansible-token
-  register: token_file_stat
+- name: Generate and Configure Coolify SSH Keys (BETA)
+  block:
+    - name: Ensure Coolify SSH keys directory exists
+      ansible.builtin.file:
+        path: /data/coolify/ssh/keys
+        state: directory
+        mode: '0700'
+        owner: 9999
+        group: 9999
 
-- name: Read saved API token
-  ansible.builtin.command: cat /data/coolify/ansible-token
-  register: saved_token
-  when: token_file_stat.stat.exists
-  changed_when: false
-  no_log: true
+    - name: Check if Coolify identity key exists
+      ansible.builtin.stat:
+        path: /data/coolify/ssh/keys/id.root@host.docker.internal
+      register: coolify_identity_key
+
+    - name: Generate RSA SSH key pair for Coolify
+      ansible.builtin.command:
+        cmd: ssh-keygen -t rsa -b 4096 -f /data/coolify/ssh/keys/id.root@host.docker.internal -q -N "" -C root@coolify
+      when: not coolify_identity_key.stat.exists
+
+    - name: Set correct ownership for keys
+      ansible.builtin.file:
+        path: "{{ item }}"
+        owner: 9999
+        group: 9999
+      loop:
+        - /data/coolify/ssh/keys/id.root@host.docker.internal
+        - /data/coolify/ssh/keys/id.root@host.docker.internal.pub
+
+    - name: Read Coolify public key
+      ansible.builtin.slurp:
+        src: /data/coolify/ssh/keys/id.root@host.docker.internal.pub
+      register: coolify_pub_key_slurp
+
+    - name: Read Coolify private key
+      ansible.builtin.slurp:
+        src: /data/coolify/ssh/keys/id.root@host.docker.internal
+      register: coolify_priv_key_slurp
+
+    - name: Save Coolify private key to local state folder
+      ansible.builtin.copy:
+        content: "{{ coolify_priv_key_slurp.content | b64decode }}"
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/coolify_id_rsa"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Save Coolify public key to local state folder
+      ansible.builtin.copy:
+        content: "{{ coolify_pub_key_slurp.content | b64decode }}"
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/coolify_id_rsa.pub"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+
+    - name: Add Coolify public key to host authorized_keys
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ coolify_pub_key_slurp.content | b64decode }}"
 
 - name: Wait for Coolify container to be ready
   ansible.builtin.command: docker exec coolify php artisan --version
@@ -19,37 +68,93 @@
   delay: 2
   changed_when: false
 
-- name: Ensure Coolify API is enabled
+- name: Early Coolify Initialization (Localhost Server & API) (BETA)
   ansible.builtin.shell: |
     docker exec coolify php artisan tinker --execute='
     try {
-        $settings = \App\Models\InstanceSettings::first();
-        if ($settings) {
-            if (!$settings->is_api_enabled) {
-                $settings->is_api_enabled = true;
-                $settings->save();
-                echo "API_ENABLED";
-            } else {
-                echo "API_ALREADY_ENABLED";
-            }
-        } else {
-            \App\Models\InstanceSettings::create(["is_api_enabled" => true]);
-            echo "API_SETTINGS_CREATED";
+        // 1. Ensure Private Key exists in DB
+        $privateKey = \App\Models\PrivateKey::where("name", "{{ inventory_hostname }}")->first();
+        if (!$privateKey) {
+            $privateKey = \App\Models\PrivateKey::create([
+                "name" => "{{ inventory_hostname }}",
+                "description" => "Initial identity key",
+                "private_key" => <<<'EOF'
+    {{ coolify_priv_key_slurp.content | b64decode | trim }}
+    EOF
+            ]);
         }
+
+        // 2. Ensure Localhost Server exists in DB
+        $server = \App\Models\Server::where("ip", "127.0.0.1")->orWhere("name", "localhost")->first();
+        if (!$server) {
+            $server = \App\Models\Server::create([
+                "name" => "localhost",
+                "ip" => "127.0.0.1",
+                "user" => "root",
+                "port" => 22,
+                "private_key_id" => $privateKey->id,
+                "is_build_server" => true,
+                "proxy_type" => "traefik",
+            ]);
+        } else {
+            $server->private_key_id = $privateKey->id;
+            $server->save();
+        }
+
+        // 3. Enable API and Finish Onboarding
+        $settings = \App\Models\InstanceSettings::first();
+        if (!$settings) {
+            $settings = \App\Models\InstanceSettings::create([
+                "is_api_enabled" => true,
+                "is_onboarding_finished" => true
+            ]);
+        }
+        $settings->is_api_enabled = true;
+        $settings->is_onboarding_finished = true;
+
+        $allowed_ips = array_filter(explode(",", $settings->allowed_ips ?? ""));
+        if (!in_array("127.0.0.1", $allowed_ips)) {
+            $allowed_ips[] = "127.0.0.1";
+        }
+        $public_ip = "{{ ansible_host }}";
+        if ($public_ip && !in_array($public_ip, $allowed_ips)) {
+            $allowed_ips[] = $public_ip;
+        }
+        $settings->allowed_ips = implode(",", $allowed_ips);
+        $settings->save();
+
+        echo "COOLIFY_INITIALIZED";
+        \Illuminate\Support\Facades\Artisan::call("optimize:clear");
     } catch (\Exception $e) {
-        echo "API_ENABLE_ERROR: " . $e->getMessage();
+        echo "INIT_ERROR: " . $e->getMessage();
+        exit(1);
     }
     '
-  register: api_enable_result
-  changed_when: "'API_ENABLED' in api_enable_result.stdout or 'API_SETTINGS_CREATED' in api_enable_result.stdout"
+  register: init_result
+  changed_when: "'COOLIFY_INITIALIZED' in init_result.stdout"
   when: not ansible_check_mode
   no_log: true
 
-- name: Setup Coolify API and Token
+- name: Check if API token is already saved on host
+  ansible.builtin.stat:
+    path: /data/coolify/ansible-token
+  register: token_file_stat
+
+- name: Read saved API token
+  ansible.builtin.shell: cat /data/coolify/ansible-token | tr -d '\n' | tr -d '\r' | tr -d '%'
+  register: saved_token
+  when: token_file_stat.stat.exists
+  changed_when: false
+  no_log: true
+
+- name: Setup Coolify API and Token (BETA)
   ansible.builtin.shell: |
     docker exec coolify php artisan tinker --execute='
     $tokenName = "ansible-token";
-    $user = \App\Models\User::first();
+    $user = \App\Models\User::where("email", "{{ coolify_root_user_email }}")->first();
+    if (!$user) {
+        $user = \App\Models\User::first();
+    }
     
     if (!$user && "{{ coolify_root_user_email }}" != "") {
         $user = \App\Models\User::create([
@@ -60,6 +165,9 @@
         ]);
     }
     if ($user) {
+        // Ensure user is an admin and onboarding is done
+        $user->forceFill(["email_verified_at" => now()])->save();
+        
         $token = $user->tokens()->where("name", $tokenName)->first();
         if ($token) {
             $token->delete();
@@ -85,7 +193,7 @@
             echo $plainToken;
         }
     }
-    '
+    ' | tail -n 1 | tr -d '\n' | tr -d '\r'
   register: api_token_result
   when: not token_file_stat.stat.exists
   changed_when: true
@@ -93,13 +201,13 @@
 
 - name: Save API token to host for reuse
   ansible.builtin.copy:
-    content: "{{ api_token_result.stdout_lines | last | trim }}"
+    content: "{{ api_token_result.stdout | trim }}"
     dest: /data/coolify/ansible-token
     mode: '0600'
   when: 
     - not token_file_stat.stat.exists 
     - api_token_result is defined
-    - api_token_result.stdout_lines | default([]) | length > 0
+    - api_token_result.stdout is defined and api_token_result.stdout != ""
   no_log: true
 
 - name: Initialize API Token fact
@@ -108,23 +216,40 @@
 
 - name: Set API Token fact from saved file
   ansible.builtin.set_fact:
-    coolify_api_token: "{{ saved_token.stdout_lines | last | trim }}"
+    coolify_api_token: "{{ saved_token.stdout | trim }}"
   when: 
     - token_file_stat.stat.exists
-    - saved_token.stdout_lines | default([]) | length > 0
+    - saved_token.stdout is defined and saved_token.stdout != ""
   no_log: true
 
 - name: Set API Token fact from command result
   ansible.builtin.set_fact:
-    coolify_api_token: "{{ api_token_result.stdout_lines | last | trim }}"
+    coolify_api_token: "{{ api_token_result.stdout | trim }}"
   when: 
     - not token_file_stat.stat.exists
     - api_token_result is defined
-    - api_token_result.stdout_lines | default([]) | length > 0
+    - api_token_result.stdout is defined and api_token_result.stdout != ""
   no_log: true
 
-- name: Validate API Token
-  ansible.builtin.fail:
-    msg: "Coolify API token is empty. This usually means the Coolify instance is not ready or no admin user exists yet."
-  when: coolify_api_token == ""
+- name: Validate API Token (BETA)
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/version"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: api_version_check
+  when: 
+    - not ansible_check_mode
+    - coolify_api_token != ""
+  ignore_errors: true
+
+- name: Warn if API Token is invalid
+  ansible.builtin.debug:
+    msg: "WARNING: Coolify API validation failed. This usually means the API is disabled or the token is incorrect. You may need to register servers manually in the Coolify UI."
+  when: coolify_api_token == "" or (api_version_check.failed | default(false)) or (api_version_check.status | default(0) != 200)
+
+- name: Set API success fact
+  ansible.builtin.set_fact:
+    coolify_api_ready: "{{ not (api_version_check.failed | default(true)) and (api_version_check.status | default(0) == 200) }}"
 

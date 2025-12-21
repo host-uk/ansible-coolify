@@ -60,15 +60,6 @@
     - ansible_os_family == 'Debian'
     - install_result is defined
 
-- name: Restart Coolify containers
-  ansible.builtin.command: "docker compose restart"
-  args:
-    chdir: /data/coolify/source
-  changed_when: true
-  when: 
-    - install_result is defined
-    - install_result is changed
-    - ansible_os_family == 'Debian'
 
 - name: Ensure Coolify .env exists for backup
   ansible.builtin.stat:
@@ -102,14 +93,43 @@
     - coolify_env_file.stat.exists
     - s3_enabled | bool
   no_log: true
-  notify: Restart Coolify containers
 
-- name: Setup Coolify API
+- name: Setup Coolify API (BETA)
   ansible.builtin.include_tasks: api_setup.yml
+  when: coolify_auto_setup_enabled | default(false) | bool
 
-- name: Setup Private Key
+- name: Setup Private Key (BETA)
   ansible.builtin.include_tasks: key_setup.yml
-  when: "'production' not in group_names"
+  vars:
+    coolify_key_name: "{{ inventory_hostname }}"
+    coolify_save_to_state: true
+  when: 
+    - coolify_auto_setup_enabled | default(false) | bool
+    - "'production' not in group_names"
+    - coolify_api_ready | default(false) | bool
 
-- name: Register All Nodes
+- name: Register All Nodes (BETA)
   ansible.builtin.include_tasks: register_all_nodes.yml
+  when: 
+    - coolify_auto_setup_enabled | default(false) | bool
+    - coolify_api_ready | default(false) | bool
+
+- name: Manage Coolify Host SSH Key
+  block:
+    - name: Fetch Coolify Public Key from Controller
+      ansible.builtin.slurp:
+        src: /data/coolify/ssh/keys/id.root@host.docker.internal.pub
+      register: coolify_generated_pub_key
+      ignore_errors: true
+
+    - name: Distribute Coolify Public Key to All Servers
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ coolify_generated_pub_key.content | b64decode }}"
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['production'] | default([]) + groups['development'] | default([]) }}"
+      when: 
+        - coolify_generated_pub_key is success
+        - coolify_generated_pub_key.content is defined
+      run_once: true

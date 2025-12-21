@@ -12,6 +12,7 @@
       vars:
         coolify_key_name: "{{ node_name }}"
         coolify_private_key_path: "{{ current_node_key_path }}"
+        coolify_save_to_state: true
 
     - name: Add Node IP to Coolify Allowed IPs
       ansible.builtin.shell: |
@@ -57,6 +58,7 @@
           Authorization: "Bearer {{ coolify_api_token }}"
       register: servers_list
       when: not ansible_check_mode
+      ignore_errors: true
 
     - name: Post server registration to Coolify
       ansible.builtin.uri:
@@ -79,6 +81,7 @@
         status_code: [200, 201]
       when: 
         - not ansible_check_mode
+        - servers_list is success
         - servers_list.json is defined
         - servers_list.json | type_debug == 'list'
         - servers_list.json | selectattr('name', 'equalto', current_node_hostname) | list | length == 0
