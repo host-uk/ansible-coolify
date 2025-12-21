@@ -34,9 +34,6 @@
   roles:
     - role: common
     - role: coolify
-      vars:
-        # We register nodes in a separate play after they are configured
-        coolify_register_server: false
 
 - name: Builder configuration
   hosts: builder
@@ -54,13 +51,13 @@
   roles:
     - role: common
 
-- name: Register Nodes in Coolify
-  hosts: controller
-  become: true
-  become_user: root
-  gather_facts: true
-  tasks:
-    - name: Register Nodes
-      ansible.builtin.include_role:
-        name: coolify
-        tasks_from: register_all_nodes.yml
+#- name: Register Nodes in Coolify
+#  hosts: controller
+#  become: true
+#  become_user: root
+#  gather_facts: true
+#  tasks:
+#    - name: Register Nodes
+#      ansible.builtin.include_role:
+#        name: coolify
+#        tasks_from: register_all_nodes.yml

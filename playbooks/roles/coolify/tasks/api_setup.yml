@@ -1,4 +1,89 @@
 ---
+- name: Early Coolify Initialization (BETA)
+  ansible.builtin.shell: |
+    docker exec coolify php artisan tinker --execute='
+    try {
+        // Ensure host.docker.internal exists in DB
+        $server = \Illuminate\Support\Facades\DB::table("servers")
+            ->where("ip", "host.docker.internal")
+            ->orWhere("ip", "127.0.0.1")
+            ->orWhere("name", "localhost")
+            ->first();
+
+        if ($server) {
+             \Illuminate\Support\Facades\DB::table("servers")->where("id", $server->id)->update([
+                 "name" => "host.docker.internal",
+                 "ip" => "host.docker.internal"
+             ]);
+             
+             // Try to update the associated private key name too
+             if (isset($server->private_key_id)) {
+                 \Illuminate\Support\Facades\DB::table("private_keys")
+                    ->where("id", $server->private_key_id)
+                    ->update(["name" => "host.docker.internal"]);
+             }
+        }
+
+        // Enable API and Finish Onboarding via DB to bypass any model issues with ID 0
+        $settings = \Illuminate\Support\Facades\DB::table("instance_settings")->where("id", 0)->first();
+        if (!$settings) {
+            $settings = \Illuminate\Support\Facades\DB::table("instance_settings")->first();
+        }
+        
+        if ($settings) {
+            $allowed_ips = array_filter(explode(",", $settings->allowed_ips ?? ""));
+            if (!in_array("127.0.0.1", $allowed_ips)) {
+                $allowed_ips[] = "127.0.0.1";
+            }
+            $public_ip = "{{ ansible_host }}";
+            if ($public_ip && !in_array($public_ip, $allowed_ips)) {
+                $allowed_ips[] = $public_ip;
+            }
+            
+            \Illuminate\Support\Facades\DB::table("instance_settings")->where("id", $settings->id)->update([
+                "is_api_enabled" => true,
+                "is_onboarding_finished" => true,
+                "allowed_ips" => implode(",", $allowed_ips)
+            ]);
+            echo "COOLIFY_INITIALIZED\n";
+        } else {
+             // Fallback to creation if none exists. Try to force ID 0 but be graceful.
+             try {
+                 \Illuminate\Support\Facades\DB::table("instance_settings")->insert([
+                    "id" => 0,
+                    "is_api_enabled" => true,
+                    "is_onboarding_finished" => true,
+                    "allowed_ips" => "127.0.0.1,{{ ansible_host }}"
+                 ]);
+             } catch (\Exception $e) {
+                 \Illuminate\Support\Facades\DB::table("instance_settings")->insert([
+                    "is_api_enabled" => true,
+                    "is_onboarding_finished" => true,
+                    "allowed_ips" => "127.0.0.1,{{ ansible_host }}"
+                 ]);
+             }
+             echo "COOLIFY_INITIALIZED\n";
+        }
+    } catch (\Exception $e) {
+        echo "INIT_ERROR: " . $e->getMessage() . "\n";
+        exit(1);
+    }
+    '
+  register: init_result
+  changed_when: "'COOLIFY_INITIALIZED' in init_result.stdout"
+  when: not ansible_check_mode
+
+- name: Clear Coolify Cache (BETA)
+  ansible.builtin.command: "docker exec coolify php artisan {{ item }}"
+  loop:
+    - optimize:clear
+    - config:clear
+    - cache:clear
+  when: 
+    - not ansible_check_mode
+    - init_result is success
+  changed_when: true
+
 - name: Generate and Configure Coolify SSH Keys (BETA)
   block:
     - name: Ensure Coolify SSH keys directory exists
@@ -11,130 +96,77 @@
 
     - name: Check if Coolify identity key exists
       ansible.builtin.stat:
-        path: /data/coolify/ssh/keys/id.root@host.docker.internal
+        path: "{{ coolify_identity_key_actual_path }}"
       register: coolify_identity_key
 
     - name: Generate RSA SSH key pair for Coolify
       ansible.builtin.command:
         cmd: ssh-keygen -t rsa -b 4096 -f /data/coolify/ssh/keys/id.root@host.docker.internal -q -N "" -C root@coolify
-      when: not coolify_identity_key.stat.exists
+      when: 
+        - not coolify_identity_key.stat.exists
+        - coolify_detected_key_uuid == ""
+
+    - name: Update key path if newly generated
+      ansible.builtin.set_fact:
+        coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+      when: 
+        - not coolify_identity_key.stat.exists
+        - coolify_detected_key_uuid == ""
+
+    - name: Check which files exist for ownership (after potential generation)
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ coolify_identity_key_actual_path }}"
+        - "{{ coolify_identity_key_actual_path }}.pub"
+        - "{{ coolify_identity_key_actual_path | regex_replace('ssh_key@', '') }}.pub"
+      register: key_stats_after_gen
 
     - name: Set correct ownership for keys
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ item.item }}"
         owner: 9999
         group: 9999
-      loop:
-        - /data/coolify/ssh/keys/id.root@host.docker.internal
-        - /data/coolify/ssh/keys/id.root@host.docker.internal.pub
+        mode: "{{ '0600' if not item.item.endswith('.pub') else '0644' }}"
+      loop: "{{ key_stats_after_gen.results }}"
+      when: item.stat.exists
 
-    - name: Read Coolify public key
-      ansible.builtin.slurp:
-        src: /data/coolify/ssh/keys/id.root@host.docker.internal.pub
-      register: coolify_pub_key_slurp
+    - name: Update key facts if newly generated or path changed
+      ansible.builtin.include_tasks: detect_keys.yml
+      when: not coolify_identity_key.stat.exists and coolify_detected_key_uuid == ""
 
-    - name: Read Coolify private key
-      ansible.builtin.slurp:
-        src: /data/coolify/ssh/keys/id.root@host.docker.internal
-      register: coolify_priv_key_slurp
-
-    - name: Save Coolify private key to local state folder
-      ansible.builtin.copy:
-        content: "{{ coolify_priv_key_slurp.content | b64decode }}"
-        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/coolify_id_rsa"
-        mode: '0600'
-      delegate_to: localhost
-      become: false
-
-    - name: Save Coolify public key to local state folder
-      ansible.builtin.copy:
-        content: "{{ coolify_pub_key_slurp.content | b64decode }}"
-        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/coolify_id_rsa.pub"
-        mode: '0644'
-      delegate_to: localhost
-      become: false
-
-    - name: Add Coolify public key to host authorized_keys
-      ansible.posix.authorized_key:
-        user: root
-        state: present
-        key: "{{ coolify_pub_key_slurp.content | b64decode }}"
-
-- name: Wait for Coolify container to be ready
-  ansible.builtin.command: docker exec coolify php artisan --version
-  register: artisan_check
-  until: artisan_check.rc == 0
-  retries: 30
-  delay: 2
-  changed_when: false
-
-- name: Early Coolify Initialization (Localhost Server & API) (BETA)
+- name: Register newly generated key in DB if needed (BETA)
   ansible.builtin.shell: |
     docker exec coolify php artisan tinker --execute='
     try {
-        // 1. Ensure Private Key exists in DB
-        $privateKey = \App\Models\PrivateKey::where("name", "host.docker.internal")->first();
+        $privateKey = \Illuminate\Support\Facades\DB::table("private_keys")->where("name", "host.docker.internal")->first();
         if (!$privateKey) {
-            $privateKey = \App\Models\PrivateKey::create([
+            $id = \Illuminate\Support\Facades\DB::table("private_keys")->insertGetId([
                 "name" => "host.docker.internal",
                 "description" => "Initial identity key",
                 "private_key" => <<<'EOF'
-    {{ coolify_priv_key_slurp.content | b64decode | trim }}
+    {{ coolify_priv_key_slurp.content | default('') | b64decode | trim }}
     EOF
-            ]);
-        }
-
-        // 2. Ensure Localhost Server exists in DB
-        $server = \App\Models\Server::where("ip", "127.0.0.1")->orWhere("name", "host.docker.internal")->first();
-        if (!$server) {
-            $server = \App\Models\Server::create([
-                "name" => "host.docker.internal",
-                "ip" => "127.0.0.1",
-                "user" => "root",
-                "port" => 22,
-                "private_key_id" => $privateKey->id,
-                "is_build_server" => true,
-                "proxy_type" => "traefik",
-            ]);
+            ], "id");
+            $privateKeyId = $id;
         } else {
-            $server->name = "host.docker.internal";
-            $server->private_key_id = $privateKey->id;
-            $server->save();
+            $privateKeyId = $privateKey->id;
         }
-
-        // 3. Enable API and Finish Onboarding
-        $settings = \App\Models\InstanceSettings::first();
-        if (!$settings) {
-            $settings = \App\Models\InstanceSettings::create([
-                "is_api_enabled" => true,
-                "is_onboarding_finished" => true
+        
+        $server = \Illuminate\Support\Facades\DB::table("servers")->where("ip", "host.docker.internal")->first();
+        if ($server && $server->private_key_id != $privateKeyId) {
+            \Illuminate\Support\Facades\DB::table("servers")->where("id", $server->id)->update([
+                "private_key_id" => $privateKeyId
             ]);
         }
-        $settings->is_api_enabled = true;
-        $settings->is_onboarding_finished = true;
-
-        $allowed_ips = array_filter(explode(",", $settings->allowed_ips ?? ""));
-        if (!in_array("127.0.0.1", $allowed_ips)) {
-            $allowed_ips[] = "127.0.0.1";
-        }
-        $public_ip = "{{ ansible_host }}";
-        if ($public_ip && !in_array($public_ip, $allowed_ips)) {
-            $allowed_ips[] = $public_ip;
-        }
-        $settings->allowed_ips = implode(",", $allowed_ips);
-        $settings->save();
-
-        echo "COOLIFY_INITIALIZED";
-        \Illuminate\Support\Facades\Artisan::call("optimize:clear");
     } catch (\Exception $e) {
-        echo "INIT_ERROR: " . $e->getMessage();
+        echo "ERROR: " . $e->getMessage();
         exit(1);
     }
     '
-  register: init_result
-  changed_when: "'COOLIFY_INITIALIZED' in init_result.stdout"
-  when: not ansible_check_mode
-  no_log: true
+  when: 
+    - not ansible_check_mode
+    - coolify_detected_key_uuid == ""
 
 - name: Check if API token is already saved on host
   ansible.builtin.stat:
@@ -151,48 +183,53 @@
 - name: Setup Coolify API and Token (BETA)
   ansible.builtin.shell: |
     docker exec coolify php artisan tinker --execute='
-    $tokenName = "ansible-token";
-    $user = \App\Models\User::where("email", "{{ coolify_root_user_email }}")->first();
-    if (!$user) {
-        $user = \App\Models\User::first();
-    }
-    
-    if (!$user && "{{ coolify_root_user_email }}" != "") {
-        $user = \App\Models\User::create([
-            "name" => "{{ coolify_root_username }}",
-            "email" => "{{ coolify_root_user_email }}",
-            "password" => \Illuminate\Support\Facades\Hash::make("{{ coolify_root_user_password }}"),
-            "email_verified_at" => now(),
-        ]);
-    }
-    if ($user) {
-        // Ensure user is an admin and onboarding is done
-        $user->forceFill(["email_verified_at" => now()])->save();
+    try {
+        $tokenName = "ansible-token";
+        $user = \App\Models\User::where("email", "{{ coolify_root_user_email }}")->first();
+        if (!$user) {
+            $user = \App\Models\User::first();
+        }
         
-        $token = $user->tokens()->where("name", $tokenName)->first();
-        if ($token) {
-            $token->delete();
-        }
-        $team = $user->teams()->first();
-        if (!$team) {
-            $team = \App\Models\Team::create([
-                "name" => $user->name . " Team",
-                "personal_team" => true,
+        if (!$user && "{{ coolify_root_user_email }}" != "") {
+            $user = \App\Models\User::create([
+                "name" => "{{ coolify_root_username }}",
+                "email" => "{{ coolify_root_user_email }}",
+                "password" => \Illuminate\Support\Facades\Hash::make("{{ coolify_root_user_password }}"),
+                "email_verified_at" => now(),
             ]);
-            $user->teams()->attach($team->id, ["role" => "admin"]);
         }
-        if ($team) {
-            $plainToken = \Illuminate\Support\Str::random(40);
-            $newToken = new \Laravel\Sanctum\PersonalAccessToken();
-            $newToken->name = $tokenName;
-            $newToken->token = hash("sha256", $plainToken);
-            $newToken->abilities = ["*"];
-            $newToken->tokenable_id = $user->id;
-            $newToken->tokenable_type = get_class($user);
-            $newToken->team_id = $team->id;
-            $newToken->save();
-            echo $plainToken;
+        if ($user) {
+            // Ensure user is an admin and onboarding is done
+            $user->forceFill(["email_verified_at" => now()])->save();
+            
+            $token = $user->tokens()->where("name", $tokenName)->first();
+            if ($token) {
+                $token->delete();
+            }
+            $team = $user->teams()->first();
+            if (!$team) {
+                $team = \App\Models\Team::create([
+                    "name" => $user->name . " Team",
+                    "personal_team" => true,
+                ]);
+                $user->teams()->attach($team->id, ["role" => "admin"]);
+            }
+            if ($team) {
+                $plainToken = \Illuminate\Support\Str::random(40);
+                $newToken = new \Laravel\Sanctum\PersonalAccessToken();
+                $newToken->name = $tokenName;
+                $newToken->token = hash("sha256", $plainToken);
+                $newToken->abilities = ["*"];
+                $newToken->tokenable_id = $user->id;
+                $newToken->tokenable_type = get_class($user);
+                $newToken->team_id = $team->id;
+                $newToken->save();
+                echo $plainToken;
+            }
         }
+    } catch (\Exception $e) {
+        echo "ERROR: " . $e->getMessage();
+        exit(1);
     }
     ' | tail -n 1 | tr -d '\n' | tr -d '\r'
   register: api_token_result
@@ -232,25 +269,25 @@
     - api_token_result.stdout is defined and api_token_result.stdout != ""
   no_log: true
 
-- name: Validate API Token (BETA)
-  ansible.builtin.uri:
-    url: "{{ coolify_api_base_url }}/version"
-    method: GET
-    headers:
-      Authorization: "Bearer {{ coolify_api_token }}"
-    status_code: 200
-  register: api_version_check
-  when: 
-    - not ansible_check_mode
-    - coolify_api_token != ""
-  ignore_errors: true
-
-- name: Warn if API Token is invalid
-  ansible.builtin.debug:
-    msg: "WARNING: Coolify API validation failed. This usually means the API is disabled or the token is incorrect. You may need to register servers manually in the Coolify UI."
-  when: coolify_api_token == "" or (api_version_check.failed | default(false)) or (api_version_check.status | default(0) != 200)
-
-- name: Set API success fact
-  ansible.builtin.set_fact:
-    coolify_api_ready: "{{ not (api_version_check.failed | default(true)) and (api_version_check.status | default(0) == 200) }}"
+#- name: Validate API Token (BETA)
+#  ansible.builtin.uri:
+#    url: "{{ coolify_api_base_url }}/version"
+#    method: GET
+#    headers:
+#      Authorization: "Bearer {{ coolify_api_token }}"
+#    status_code: 200
+#  register: api_version_check
+#  when:
+#    - not ansible_check_mode
+#    - coolify_api_token != ""
+#  ignore_errors: true
+#
+#- name: Warn if API Token is invalid
+#  ansible.builtin.debug:
+#    msg: "WARNING: Coolify API validation failed. This usually means the API is disabled or the token is incorrect. You may need to register servers manually in the Coolify UI."
+#  when: coolify_api_token == "" or (api_version_check.failed | default(false)) or (api_version_check.status | default(0) != 200)
+#
+#- name: Set API success fact
+#  ansible.builtin.set_fact:
+#    coolify_api_ready: "{{ not (api_version_check.failed | default(true)) and (api_version_check.status | default(0) == 200) }}"
 

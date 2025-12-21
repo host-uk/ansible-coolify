@@ -43,6 +43,9 @@ dev-create-db:
 dev-create-service:
 	$(MAKE) _run-pb PB=playbooks/coolify/service/create.yml LIMIT=development
 
+dev-configure-automation:
+	$(MAKE) _run-pb PB=playbooks/coolify/configure_automation.yml LIMIT=development
+
 dev-deploy:
 	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=development
 
@@ -253,6 +256,9 @@ prod-create-db:
 
 prod-create-service:
 	$(MAKE) _run-pb PB=playbooks/coolify/service/create.yml LIMIT=production
+
+prod-configure-automation:
+	$(MAKE) _run-pb PB=playbooks/coolify/configure_automation.yml LIMIT=production
 
 prod-deploy:
 	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=production

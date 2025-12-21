@@ -8,6 +8,7 @@
   register: keys_list
   when: 
     - not ansible_check_mode
+    - coolify_api_ready | default(false) | bool
     - coolify_api_token | default('') != ''
   ignore_errors: true
 
@@ -47,7 +48,9 @@
 
     - name: Prepare and normalize private key content
       ansible.builtin.set_fact:
-        coolify_private_key_content: "{{ (local_priv_key.content if (local_priv_key is defined and local_priv_key.content is defined) else (remote_priv_key.content if (remote_priv_key is defined and remote_priv_key.content is defined) else '')) | b64decode | replace('\r', '') | trim ~ '\n' }}"
+        coolify_private_key_content: >-
+          {%- set content = (local_priv_key.content | default('') | b64decode | trim) if (local_priv_key.content is defined) else (remote_priv_key.content | default('') | b64decode | trim) if (remote_priv_key.content is defined) else '' -%}
+          {{ content ~ '\n' if content != '' else '' }}
       no_log: true
       when: >
         (local_priv_key is defined and local_priv_key.content is defined) or
@@ -154,7 +157,9 @@
               private_key: "{{ coolify_private_key_content }}"
             status_code: [201]
           register: create_key_result
-          when: coolify_api_token | default('') != ''
+          when: 
+            - coolify_api_ready | default(false) | bool
+            - coolify_api_token | default('') != ''
       when: 
         - coolify_private_key_content is defined
         - coolify_private_key_content.startswith('-----BEGIN')
@@ -172,7 +177,6 @@
   when: 
     - not ansible_check_mode
     - coolify_key_uuid == ""
-    - "'production' not in group_names"
 
 - name: Set Public Key fact from existing keys
   ansible.builtin.set_fact:
@@ -190,6 +194,7 @@
   register: keys_list_after_create
   when: 
     - not ansible_check_mode
+    - coolify_api_ready | default(false) | bool
     - coolify_api_token | default('') != ''
     - create_key_result is defined
     - create_key_result is changed

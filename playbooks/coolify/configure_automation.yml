@@ -1,0 +1,39 @@
+---
+- name: Configure Coolify Automations and Integrations
+  hosts: controller
+  become: true
+  become_user: root
+  gather_facts: true
+  tasks:
+    - name: Configure S3 Storage
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: configure_s3.yml
+
+    - name: Detect Coolify Keys
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: detect_keys.yml
+
+    - name: Setup Coolify API
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+      when: coolify_auto_setup_enabled | default(false) | bool
+
+    - name: Setup Private Key
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: key_setup.yml
+      vars:
+        coolify_key_name: "host.docker.internal"
+        coolify_save_to_state: true
+      when:
+        - coolify_auto_setup_enabled | default(false) | bool
+
+    - name: Register All Nodes
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: register_all_nodes.yml
+      when:
+        - coolify_auto_setup_enabled | default(false) | bool

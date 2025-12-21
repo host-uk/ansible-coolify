@@ -10,9 +10,9 @@
   delegate_to: localhost
   become: false
 
-- name: Setup API for backup trigger
-  ansible.builtin.include_tasks: api_setup.yml
-  when: "'controller' in group_names"
+#- name: Setup API for backup trigger
+#  ansible.builtin.include_tasks: api_setup.yml
+#  when: "'controller' in group_names"
 
 - name: Trigger manual schedule run on controller
   ansible.builtin.command: docker exec coolify php artisan schedule:run-manual
@@ -122,8 +122,9 @@
   register: backup_keys_list
   when: 
     - "'controller' in group_names"
-    - "'production' not in group_names"
     - not ansible_check_mode
+    - coolify_api_ready | default(false) | bool
+    - coolify_api_token | default('') != ''
   ignore_errors: true
 
 - name: Save Coolify public keys to local backup
@@ -136,7 +137,6 @@
   become: false
   when:
     - "'controller' in group_names"
-    - "'production' not in group_names"
     - not ansible_check_mode
     - backup_keys_list is defined and backup_keys_list.json is defined
     - item.public_key is defined

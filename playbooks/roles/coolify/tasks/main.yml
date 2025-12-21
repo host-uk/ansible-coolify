@@ -11,6 +11,14 @@
     - ansible_os_family == 'Debian'
     - common_manage_ufw | default(false) | bool
 
+- name: Ensure host.docker.internal resolves to 127.0.0.1
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.0\.1'
+    line: "127.0.0.1 localhost {{ inventory_hostname }} host.docker.internal"
+    state: present
+  when: ansible_os_family == 'Debian'
+
 - name: Check if Coolify is already installed
   ansible.builtin.stat:
     path: /data/coolify/source/.env
@@ -38,9 +46,9 @@
 - name: Execute Coolify installation script
   ansible.builtin.command: "/root/install.sh"
   environment:
-    ROOT_USERNAME: "{{ coolify_root_username }}"
-    ROOT_USER_EMAIL: "{{ coolify_root_user_email }}"
-    ROOT_USER_PASSWORD: "{{ coolify_root_user_password }}"
+#    ROOT_USERNAME: "{{ coolify_root_username }}"
+#    ROOT_USER_EMAIL: "{{ coolify_root_user_email }}"
+#    ROOT_USER_PASSWORD: "{{ coolify_root_user_password }}"
     DOCKER_ADDRESS_POOL_BASE: "{{ coolify_docker_address_pool_base }}"
     DOCKER_ADDRESS_POOL_SIZE: "{{ coolify_docker_address_pool_size | string }}"
     DOCKER_POOL_FORCE_OVERRIDE: "{{ coolify_docker_pool_force_override | string | lower }}"
@@ -75,63 +83,27 @@
     - ansible_os_family == 'Debian'
     - coolify_env_file.stat.exists
 
-- name: Configure Coolify Application S3 Storage in .env
-  ansible.builtin.lineinfile:
-    path: /data/coolify/source/.env
-    regexp: "^{{ item.key }}="
-    line: "{{ item.key }}={{ item.value }}"
-    state: present
-  loop:
-    - { key: 'S3_ENABLED', value: "{{ s3_enabled | string | lower }}" }
-    - { key: 'S3_ENDPOINT', value: "{{ s3_endpoint }}" }
-    - { key: 'S3_REGION', value: "{{ s3_region }}" }
-    - { key: 'S3_BUCKET', value: "{{ s3_bucket }}" }
-    - { key: 'S3_ACCESS_KEY', value: "{{ lookup('env', 'HETZNER_S3_APP_ACCESS_KEY') | default(s3_access_key) }}" }
-    - { key: 'S3_SECRET_KEY', value: "{{ lookup('env', 'HETZNER_S3_APP_SECRET_KEY') | default(s3_secret_key) }}" }
+- name: Backup Coolify SSH keys to local machine
+  block:
+    - name: Archive Coolify SSH keys
+      ansible.builtin.shell: |
+        tar -czf /tmp/coolify_ssh_keys.tar.gz -C /data/coolify/ssh/keys .
+      changed_when: true
+      register: ssh_keys_archive
+      ignore_errors: true
+
+    - name: Fetch Coolify SSH keys archive
+      ansible.builtin.fetch:
+        src: /tmp/coolify_ssh_keys.tar.gz
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/backups/coolify/coolify_ssh_keys.tar.gz"
+        flat: true
+      when: ssh_keys_archive is success
+
+    - name: Remove temporary archive
+      ansible.builtin.file:
+        path: /tmp/coolify_ssh_keys.tar.gz
+        state: absent
   when: 
     - ansible_os_family == 'Debian'
     - coolify_env_file.stat.exists
-    - s3_enabled | bool
-  no_log: true
 
-- name: Setup Coolify API (BETA)
-  ansible.builtin.include_tasks: api_setup.yml
-  when: coolify_auto_setup_enabled | default(false) | bool
-
-- name: Setup Private Key (BETA)
-  ansible.builtin.include_tasks: key_setup.yml
-  vars:
-    coolify_key_name: "host.docker.internal"
-    coolify_save_to_state: true
-  when: 
-    - coolify_auto_setup_enabled | default(false) | bool
-    - "'production' not in group_names"
-    - coolify_api_ready | default(false) | bool
-
-- name: Register All Nodes (BETA)
-  ansible.builtin.include_tasks: register_all_nodes.yml
-  when: 
-    - coolify_auto_setup_enabled | default(false) | bool
-    - coolify_api_ready | default(false) | bool
-
-- name: Manage Coolify Host SSH Key
-  block:
-    - name: Fetch Coolify Public Key from Controller
-      ansible.builtin.slurp:
-        src: /data/coolify/ssh/keys/id.root@host.docker.internal.pub
-      register: coolify_generated_pub_key
-      ignore_errors: true
-
-    - name: Distribute Coolify Public Key to All Servers
-      ansible.posix.authorized_key:
-        user: root
-        state: present
-        key: "{{ coolify_generated_pub_key.content | b64decode }}"
-      delegate_to: "{{ item }}"
-      loop: "{{ groups['production'] | default([]) + groups['development'] | default([]) }}"
-      when: 
-        - coolify_generated_pub_key is success
-        - coolify_generated_pub_key.content is defined
-      run_once: true
-  when: 
-    - coolify_auto_setup_enabled | default(false) | bool

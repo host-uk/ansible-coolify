@@ -1,0 +1,149 @@
+---
+- name: Wait for Coolify container to be ready
+  ansible.builtin.command: docker exec coolify php artisan --version
+  register: artisan_check
+  until: artisan_check.rc == 0
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: Detect existing Coolify keys and servers
+  ansible.builtin.shell: |
+    docker exec coolify php artisan tinker --execute='
+    try {
+        $server = \App\Models\Server::where("ip", "host.docker.internal")
+            ->orWhere("ip", "127.0.0.1")
+            ->orWhere("name", "localhost")
+            ->first();
+
+        $foundKey = null;
+        if ($server) {
+             $foundKey = $server->privateKey;
+        } else {
+            $foundKey = \App\Models\PrivateKey::where("name", "host.docker.internal")
+                ->orWhere("name", "localhost\u0027s key")
+                ->first();
+        }
+
+        if ($foundKey) {
+            echo "DETECTED_KEY_UUID:" . $foundKey->uuid . "\n";
+            echo "DETECTED_KEY_NAME:" . $foundKey->name . "\n";
+        }
+        echo "DETECTION_SUCCESS";
+    } catch (\Exception $e) {
+        echo "DETECTION_ERROR: " . $e->getMessage();
+        exit(1);
+    }
+    '
+  register: detection_result
+  changed_when: false
+  when: not ansible_check_mode
+  no_log: true
+
+- name: Set detected key facts
+  ansible.builtin.set_fact:
+    coolify_detected_key_uuid: "{{ detection_result.stdout | regex_search('DETECTED_KEY_UUID:([^\\n]+)', '\\1') | first | default('') }}"
+    coolify_detected_key_name: "{{ detection_result.stdout | regex_search('DETECTED_KEY_NAME:([^\\n]+)', '\\1') | first | default('') }}"
+  when: not ansible_check_mode
+
+- name: Determine identity key path
+  ansible.builtin.shell: |
+    if [ -n "{{ coolify_detected_key_uuid }}" ] && [ -f "/data/coolify/ssh/keys/ssh_key@{{ coolify_detected_key_uuid }}" ]; then
+      echo "/data/coolify/ssh/keys/ssh_key@{{ coolify_detected_key_uuid }}"
+    elif [ -f "/data/coolify/ssh/keys/id.root@host.docker.internal" ]; then
+      echo "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    else
+      ls -1 /data/coolify/ssh/keys/ssh_key@* 2>/dev/null | head -n 1
+    fi
+  register: identity_key_path_cmd
+  when: not ansible_check_mode
+  changed_when: false
+
+- name: Set identity key path fact
+  ansible.builtin.set_fact:
+    coolify_identity_key_actual_path: "{{ identity_key_path_cmd.stdout | default('/data/coolify/ssh/keys/id.root@host.docker.internal') }}"
+  when: not ansible_check_mode
+
+- name: Check which key files exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ coolify_identity_key_actual_path }}"
+    - "{{ coolify_identity_key_actual_path }}.pub"
+    - "{{ coolify_identity_key_actual_path | regex_replace('ssh_key@', '') }}.pub"
+  register: key_stats
+  when: not ansible_check_mode
+
+- name: Determine public key path
+  ansible.builtin.set_fact:
+    coolify_identity_pub_key_actual_path: "{{ (key_stats.results | selectattr('item', 'search', '\\.pub$') | selectattr('stat.exists', 'equalto', true) | first).item | default('') }}"
+  when: 
+    - not ansible_check_mode
+    - key_stats.results is defined
+
+- name: Load keys into facts
+  block:
+    - name: Read Coolify private key
+      ansible.builtin.slurp:
+        src: "{{ coolify_identity_key_actual_path }}"
+      register: coolify_priv_key_slurp
+      ignore_errors: true
+
+    - name: Read Coolify public key from disk
+      ansible.builtin.slurp:
+        src: "{{ coolify_identity_pub_key_actual_path }}"
+      register: coolify_pub_key_slurp
+      when: coolify_identity_pub_key_actual_path != ""
+      ignore_errors: true
+
+    - name: Derive Coolify public key for consistency check
+      ansible.builtin.shell: ssh-keygen -y -f {{ coolify_identity_key_actual_path }}
+      register: derived_pub_key_controller
+      changed_when: false
+      ignore_errors: true
+
+    - name: Set public key content fact
+      ansible.builtin.set_fact:
+        coolify_pub_key_content: >-
+          {%- set disk_pub = (coolify_pub_key_slurp.content | b64decode | trim) if (coolify_pub_key_slurp is defined and coolify_pub_key_slurp.content is defined) else '' -%}
+          {%- set derived_pub = derived_pub_key_controller.stdout | default('') | trim -%}
+          {%- if disk_pub != '' and derived_pub != '' and derived_pub in disk_pub -%}
+            {{ disk_pub }}
+          {%- elif derived_pub != '' -%}
+            {{ derived_pub }}
+          {%- elif disk_pub != '' -%}
+            {{ disk_pub }}
+          {%- else -%}
+            {{ '' }}
+          {%- endif -%}
+
+    - name: Save Coolify private key to local state folder
+      ansible.builtin.copy:
+        content: "{{ coolify_priv_key_slurp.content | default('') | b64decode }}"
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/coolify_id_rsa"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+      when: 
+        - coolify_priv_key_slurp is success
+        - coolify_priv_key_slurp.content is defined
+
+    - name: Save Coolify public key to local state folder
+      ansible.builtin.copy:
+        content: "{{ coolify_pub_key_content }}"
+        dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/coolify_id_rsa.pub"
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      when: 
+        - coolify_pub_key_content != ""
+
+    - name: Add Coolify public key to host authorized_keys
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ coolify_pub_key_content }}"
+      when: 
+        - coolify_pub_key_content != ""
+        - inventory_hostname != 'localhost'
+  when: not ansible_check_mode
