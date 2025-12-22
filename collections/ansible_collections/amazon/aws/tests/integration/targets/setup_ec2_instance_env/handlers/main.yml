@@ -1,3 +1,0 @@
----
-- name: Delete ec2_instance environment
-  ansible.builtin.include_tasks: cleanup.yml

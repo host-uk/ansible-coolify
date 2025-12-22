@@ -1,0 +1,6 @@
+network:
+  version: 2
+  ethernets:
+    {{ private_network_interface }}:
+      addresses:
+        - {{ private_ip }}/16

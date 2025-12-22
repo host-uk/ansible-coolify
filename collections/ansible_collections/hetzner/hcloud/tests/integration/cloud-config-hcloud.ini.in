@@ -1,2 +1,0 @@
-[default]
-hcloud_api_token=$HCLOUD_TOKEN

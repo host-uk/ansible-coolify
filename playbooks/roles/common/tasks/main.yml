@@ -67,6 +67,10 @@
     - ansible_os_family == 'Debian'
     - common_manage_ufw | default(false) | bool
 
+- name: Private Network Configuration and Checks
+  ansible.builtin.include_tasks: network.yml
+  when: ansible_os_family == 'Debian'
+
 - name: Configure Fail2Ban
   ansible.builtin.template:
     src: jail.local.j2

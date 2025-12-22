@@ -1,7 +1,0 @@
-#cloud-config
-package_upgrade: true
-package_update: true
-packages:
-- httpd
-runcmd:
-- "service httpd start"

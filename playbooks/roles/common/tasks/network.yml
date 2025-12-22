@@ -1,0 +1,73 @@
+---
+- name: Detect Private Network Interface
+  ansible.builtin.set_fact:
+    private_network_interface: "{{ (ansible_interfaces | difference(['lo', ansible_default_ipv4.interface | default('')]) | select('match', '^(eth|enp|eno|ens).*') | list | first) | default(private_network_interface | default('eth1')) }}"
+  when:
+    - private_ip is defined
+    - (private_network_interface is not defined or private_network_interface not in ansible_interfaces)
+
+- name: Debug Private Network Interface
+  ansible.builtin.debug:
+    msg: "Using private interface: {{ private_network_interface }}"
+  when: private_ip is defined
+
+- name: Fail if private interface is not found
+  ansible.builtin.fail:
+    msg: "Private network interface '{{ private_network_interface }}' not found on this system. Available interfaces: {{ ansible_interfaces | join(', ') }}"
+  when:
+    - private_ip is defined
+    - private_network_interface not in ansible_interfaces
+
+- name: HCloud Private Network Setup
+  block:
+    - name: Check if netplan is used
+      ansible.builtin.stat:
+        path: /etc/netplan
+      register: netplan_dir
+
+    - name: Configure Netplan for private network
+      ansible.builtin.template:
+        src: hcloud-private-network.yaml.j2
+        dest: /etc/netplan/60-private-network.yaml
+        mode: '0600'
+      when: netplan_dir.stat.exists
+      notify: Apply netplan
+
+    - name: Ensure private interface is up (Legacy/Fallback)
+      ansible.builtin.shell: |
+        ip link set {{ private_network_interface }} up || true
+        ip addr add {{ private_ip }}/16 dev {{ private_network_interface }} || true
+      when: not netplan_dir.stat.exists
+      register: manual_ip_cmd
+      changed_when: "'RTNETLINK answers: File exists' not in manual_ip_cmd.stderr"
+      failed_when: false
+  when: 
+    - platform == 'hcloud'
+    - private_ip is defined
+    - private_network_interface is defined
+
+- name: Allow traffic from private network in UFW
+  community.general.ufw:
+    rule: allow
+    src: "{{ private_network_cidr }}"
+  when: 
+    - common_manage_ufw | default(false) | bool
+    - private_network_cidr is defined
+
+- name: Server Private IP Checks
+  block:
+    - name: Verify private IP is assigned
+      ansible.builtin.shell: ip addr show {{ private_network_interface }} | grep -q "{{ private_ip }}"
+      changed_when: false
+      register: ip_check
+      failed_when: ip_check.rc != 0
+
+    - name: Verify SSH is listening on private IP
+      ansible.builtin.wait_for:
+        host: "{{ private_ip }}"
+        port: 22
+        state: started
+        timeout: 5
+  when: 
+    - private_ip is defined 
+    - private_network_interface is defined

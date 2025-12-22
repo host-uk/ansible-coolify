@@ -1,3 +1,0 @@
----
-- name: Delete temporary pip environment
-  ansible.builtin.include_tasks: cleanup.yml

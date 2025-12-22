@@ -1,8 +1,0 @@
-download_url: https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/hetzner-hcloud-6.3.0.tar.gz
-format_version: 1.0.0
-name: hcloud
-namespace: hetzner
-server: https://galaxy.ansible.com/api/
-signatures: []
-version: 6.3.0
-version_url: /api/v3/plugin/ansible/content/published/collections/index/hetzner/hcloud/versions/6.3.0/

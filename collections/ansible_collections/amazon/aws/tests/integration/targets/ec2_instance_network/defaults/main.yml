@@ -1,2 +1,0 @@
----
-ec2_instance_name: "{{ resource_prefix }}-ec2-instance-networking"
