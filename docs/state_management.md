@@ -10,7 +10,7 @@ This directory is host-specific and is ignored by git to protect secrets and lar
 state/
 └── <inventory_hostname>/
     ├── .ssh/
-    │   └── ssh_host_*         # Public and private host keys retrieved from the baremetal host (/etc/ssh and /root/.ssh)
+    │   └── ssh_host_*         # Public and private host keys retrieved from the remote host (/etc/ssh and /root/.ssh)
     └── backups/
         └── coolify/
             ├── .env           # Coolify controller environment file
@@ -22,7 +22,7 @@ state/
         ├── hcloud_server.json      # Full HCloud server configuration
         ├── hcloud_ssh_keys.json    # List of SSH keys in HCloud
         ├── hcloud_certificates.json # List of HCloud certificates
-        └── robot_info.json         # Baremetal server configuration
+        └── robot_info.json         # Hetzner Robot server configuration
 ```
 
 #### Why we store state locally
@@ -34,15 +34,15 @@ state/
 #### Backup and Restore Workflow
 
 1.  **Backup**: Run `make dev-backup`. This triggers a series of `ansible.builtin.fetch` tasks that pull state from the remote host to `state`.
-2.  **S3 Remote Backup**: After the local backup is complete, the state directory is compressed, encrypted using the `hostuk` SSH key, and uploaded to the private **HostUK S3 Storage** (Hetzner Object Storage) for disaster recovery.
+2.  **S3 Remote Backup**: After the local backup is complete, the state directory is compressed, encrypted using the configured SSH key, and uploaded to the private **Infrastructure S3 Storage** (e.g., Hetzner Object Storage) for disaster recovery.
 3.  **Restore**: Run `make dev-restore`. This pushes the local state back to a fresh instance and runs the installation script to "heal" the environment.
 
 #### S3 Storage Configuration
 
-This project distinguishes between two separate S3-compatible buckets, both hosted at Hetzner Object Storage:
+This project distinguishes between two separate S3-compatible buckets:
 
-1.  **HostUK Private Storage (`hostuk`)**: Used for encrypted infrastructure backups (State Store).
-2.  **Coolify Public Storage (`host-uk`)**: Used for public application files (assets, uploads, etc.).
+1.  **Infrastructure Storage**: Used for encrypted infrastructure backups (State Store).
+2.  **Application Storage**: Used for public application files (assets, uploads, etc.).
 
 The configuration is primarily managed in `inventory/inventory.yml` under the `all.vars` section, allowing for environment-specific overrides:
 
@@ -55,7 +55,7 @@ The configuration is primarily managed in `inventory/inventory.yml` under the `a
 - `backup_encryption_key_path`: Path to the SSH key used for encryption (defined in `roles/coolify/defaults/main.yml`).
 
 Credentials should be provided via environment variables:
-- `HETZNER_S3_ACCESS_KEY`
-- `HETZNER_S3_SECRET_KEY`
-- `HETZNER_S3_APP_ACCESS_KEY` (Optional fallback for Coolify app storage)
-- `HETZNER_S3_APP_SECRET_KEY` (Optional fallback for Coolify app storage)
+- `HETZNER_S3_ACCESS_KEY`: Access key for Infrastructure backups.
+- `HETZNER_S3_SECRET_KEY`: Secret key for Infrastructure backups.
+- `HETZNER_S3_APP_ACCESS_KEY`: (Optional) Access key for Coolify app storage.
+- `HETZNER_S3_APP_SECRET_KEY`: (Optional) Secret key for Coolify app storage.

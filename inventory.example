@@ -1,6 +1,6 @@
 all:
   vars:
-    # HostUK Private S3 (Infrastructure Backups)
+    # Private S3 (Infrastructure Backups)
     s3_enabled: true
     s3_endpoint: "https://fsn1.your-objectstorage.com"
     s3_bucket: "your-private-bucket"

@@ -11,7 +11,7 @@ This project provides a comprehensive Ansible-based automation suite for install
 
 #### Directory Structure
 
-- ``
+- `(root)`
     - `inventory/`: Server inventory definitions for production and development.
     - `playbooks/`: Organized by resource type.
         - `coolify/`: Core Coolify operations (install, backup, restore).

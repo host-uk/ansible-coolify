@@ -27,7 +27,7 @@ If you are responsible for the health and consistency of the entire platform:
 - Use `make native-setup` to bootstrap new administrator machines with all required dependencies and collections.
 
 #### 4. For Neural Network Code Assistants
-If you are an AI assistant helping to maintain, extend, or document this platform (see [Full Persona Guide](persona_assistant.md)):
+If you are an AI assistant helping to maintain, extend, or document this platform (see [Full Persona Guide](../AGENTS.md)):
 - **Respect the Hierarchy**: Always adhere to the hierarchical playbook structure in `playbooks/` and the "State Store" pattern in `state/`.
 - **Prefer the Makefile**: Use `Makefile` targets for execution to ensure consistent environment variables, inventories, and host limits.
 - **Discover Before Doing**: When exploring a new part of the codebase, read the corresponding `docs/` file and the `get_file_structure` of relevant roles before suggesting changes.
@@ -58,17 +58,17 @@ If you are an AI assistant helping to maintain, extend, or document this platfor
 ##### `dev-deploy`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l development playbooks/coolify/create.yml
+ansible-playbook -i inventory/ -l development playbooks/coolify/create.yml
 ```
 
 ##### `prod-deploy`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/create.yml
+ansible-playbook -i inventory/ -l production playbooks/coolify/create.yml
 ```
 
 #### Backup
-**Description**: Triggers a full backup of the Coolify instance. This includes a database dump, `.env` file, encryption keys, and SSH keys. The artifacts are fetched to the local `state` directory and then uploaded (encrypted) to the private HostUK S3 storage.
+**Description**: Triggers a full backup of the Coolify instance. This includes a database dump, `.env` file, encryption keys, and SSH keys. The artifacts are fetched to the local `state` directory and then uploaded (encrypted) to the private S3 infrastructure storage.
 
 **Variables**:
 None (uses inventory defaults).
@@ -87,13 +87,13 @@ None (uses inventory defaults).
 ##### `dev-backup`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l development playbooks/coolify/backup.yml
+ansible-playbook -i inventory/ -l development playbooks/coolify/backup.yml
 ```
 
 ##### `prod-backup`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/backup.yml
+ansible-playbook -i inventory/ -l production playbooks/coolify/backup.yml
 ```
 
 #### Restore
@@ -116,13 +116,13 @@ None (uses local state files).
 ##### `dev-restore`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l development playbooks/coolify/restore.yml
+ansible-playbook -i inventory/ -l development playbooks/coolify/restore.yml
 ```
 
 ##### `prod-restore`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/restore.yml
+ansible-playbook -i inventory/ -l production playbooks/coolify/restore.yml
 ```
 
 #### Hetzner Infrastructure Setup
@@ -144,13 +144,13 @@ cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/res
 ##### `dev-hetzner-setup`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l development playbooks/hetzner_setup.yml
+ansible-playbook -i inventory/ -l development playbooks/hetzner_setup.yml
 ```
 
 ##### `prod-hetzner-setup`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l production playbooks/hetzner_setup.yml
+ansible-playbook -i inventory/ -l production playbooks/hetzner_setup.yml
 ```
 
 #### Reinstall
@@ -173,13 +173,13 @@ None.
 ##### `dev-reinstall`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l development playbooks/coolify/reinstall.yml
+ansible-playbook -i inventory/ -l development playbooks/coolify/reinstall.yml
 ```
 
 ##### `prod-reinstall`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ -l production playbooks/coolify/reinstall.yml
+ansible-playbook -i inventory/ -l production playbooks/coolify/reinstall.yml
 ```
 
 #### Login / SSH Authentication
@@ -197,7 +197,7 @@ eval $(ssh-agent -s) && ssh-add ~/.ssh/vm-worker
 ##### `prod-login`
 **Raw Command**:
 ```bash
-eval $(ssh-agent -s) && ssh-add ~/.ssh/hostuk
+eval $(ssh-agent -s) && ssh-add ~/.ssh/your-key
 ```
 
 #### Docker Deployment
@@ -243,14 +243,14 @@ make prod-docker-deploy
 ##### `dev-sync-apps`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ playbooks/coolify/application/sync.yml \
+ansible-playbook -i inventory/ playbooks/coolify/application/sync.yml \
     -e coolify_source_controller=noc.host.uk.com -e coolify_target_controller=controller.lan
 ```
 
 ##### `prod-sync-apps`
 **Raw Command**:
 ```bash
-cd ansible && ansible-playbook -i inventory/ playbooks/coolify/application/sync.yml \
+ansible-playbook -i inventory/ playbooks/coolify/application/sync.yml \
     -e coolify_source_controller=controller.lan -e coolify_target_controller=noc.host.uk.com
 ```
 

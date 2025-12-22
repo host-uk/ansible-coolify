@@ -5,7 +5,7 @@ This project integrates with Hetzner Cloud and Hetzner Robot for infrastructure 
 #### Collections Used
 
 - `hetzner.hcloud`: For managing Hetzner Cloud resources.
-- `community.hrobot`: For managing Hetzner Robot (baremetal) resources.
+- `community.hrobot`: For managing Hetzner Robot (dedicated) resources.
 
 #### Inventory Management
 
@@ -27,7 +27,7 @@ The `hetzner_infra` role handles:
 - **State Persistence**: Saves discovered infrastructure settings to `state/{{ inventory_hostname }}/hetzner/` as JSON files.
 - **rDNS Management**: Automatically sets the PTR record for both Cloud and Robot servers to match their `inventory_hostname`.
 - **Cloud Firewalls** (Optional): Manages `coolify-firewall` (Disabled by default).
-- **Robot Hardware Firewall** (Optional): Manages hardware firewall for baremetal servers (Disabled by default).
+- **Robot Hardware Firewall** (Optional): Manages hardware firewall for Robot servers (Disabled by default).
 
 #### Configuration
 

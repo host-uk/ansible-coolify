@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 '''
-HostUK Remote Inventory Script
+Remote Inventory Script
 Combines Hetzner Cloud dynamic inventory with service metadata (S3, SaaS).
 '''
 
@@ -54,7 +54,7 @@ def main():
         inventory['all']['children'].append('services')
     
     inventory['services'] = {
-        'hosts': ['hostuk_s3', 'host_uk_s3', 'cdn_endpoint', 'saas_api'],
+        'hosts': ['infra_s3', 'app_s3', 'cdn_endpoint', 'saas_api'],
         'vars': {
             'api_access_confirmed': {
                 'hcloud': os.environ.get('HCLOUD_TOKEN') is not None,
@@ -68,34 +68,34 @@ def main():
     if '_meta' not in inventory:
         inventory['_meta'] = {'hostvars': {}}
     
-    # HostUK Private S3 (Infrastructure Backups)
-    inventory['_meta']['hostvars']['hostuk_s3'] = {
+    # Infrastructure Private S3 (Backups)
+    inventory['_meta']['hostvars']['infra_s3'] = {
         'ansible_host': 'fsn1.your-objectstorage.com',
-        'bucket': 'hostuk',
+        'bucket': 'your-private-bucket',
         'region': 'fsn1',
         'type': 'private_state_store',
         'status': 'available' if os.environ.get('HETZNER_S3_ACCESS_KEY') else 'unauthenticated'
     }
     
-    # Coolify Public S3 (Application Files)
-    inventory['_meta']['hostvars']['host_uk_s3'] = {
+    # Public S3 (Application Files)
+    inventory['_meta']['hostvars']['app_s3'] = {
         'ansible_host': 'fsn1.your-objectstorage.com',
-        'bucket': 'host-uk',
+        'bucket': 'your-public-bucket',
         'region': 'fsn1',
         'type': 'public_app_assets',
         'status': 'available' if os.environ.get('HETZNER_S3_ACCESS_KEY') else 'unauthenticated'
     }
 
-    # CDN and SaaS placeholders as requested
+    # CDN and SaaS placeholders
     inventory['_meta']['hostvars']['cdn_endpoint'] = {
-        'ansible_host': 'cdn.host.uk.com',
+        'ansible_host': 'cdn.example.com',
         'provider': 'hetzner_object_storage',
-        'container': 'host-uk-cdn',
+        'container': 'example-cdn',
         'status': 'active'
     }
     
     inventory['_meta']['hostvars']['saas_api'] = {
-        'ansible_host': 'api.host.uk.com',
+        'ansible_host': 'api.example.com',
         'endpoints': [
             '/v1/billing',
             '/v1/provisioning',

@@ -31,7 +31,7 @@ To deploy a new application to Coolify via Ansible:
     ```
 3.  **Run the Playbook**:
     ```bash
-    cd ansible && ansible-playbook -i inventory/inventory.yml playbooks/coolify/application/my-new-app.yml
+    ansible-playbook -i inventory/inventory.yml playbooks/coolify/application/my-new-app.yml
     ```
 
 #### 2. Adding a New Database

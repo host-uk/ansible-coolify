@@ -142,7 +142,7 @@
     - item.public_key is defined
     - item.public_key != ""
 
-- name: Find baremetal SSH keys (public and private)
+- name: Find host SSH keys (public and private)
   ansible.builtin.find:
     paths: 
       - /root/.ssh
@@ -150,18 +150,18 @@
     patterns: 
       - "ssh_host_*"
       - "id_*"
-  register: baremetal_keys
+  register: host_ssh_keys
   when: "'controller' in group_names"
 
-- name: Fetch baremetal SSH keys
+- name: Fetch host SSH keys
   ansible.builtin.fetch:
     src: "{{ item.path }}"
     dest: "{{ coolify_state_path }}/{{ inventory_hostname }}/.ssh/"
     flat: true
-  loop: "{{ baremetal_keys.files | default([]) }}"
+  loop: "{{ host_ssh_keys.files | default([]) }}"
   when: 
     - "'controller' in group_names"
-    - baremetal_keys is defined and baremetal_keys.matched > 0
+    - host_ssh_keys is defined and host_ssh_keys.matched > 0
 
 - name: Remove temporary files on remote
   ansible.builtin.file:
