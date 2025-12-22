@@ -11,7 +11,7 @@ This repository contains Ansible playbooks to set up and harden bare metal serve
 
 ## Quick Start
 
-1. Update `inventory/inventory.yml` with your server details (Production and/or Development).
+1. Copy `inventory.example` to `inventory/inventory.yml` and update it with your server details (Production and/or Development).
 2. Ensure your SSH keys are available in `~/.ssh/`.
 3. Use Docker Compose for a consistent environment:
    - Start the container: `make up`

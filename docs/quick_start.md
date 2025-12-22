@@ -11,7 +11,10 @@ This guide will help you get up and running with the Coolify automation platform
 
 #### 2. Configuration
 
-Update `inventory/inventory.yml` with your server details. Use `inventory.example` as a template.
+Update `inventory/inventory.yml` with your server details. You can use `inventory.example` in the project root as a template by copying it:
+```bash
+cp inventory.example inventory/inventory.yml
+```
 
 #### 3. Providing Custom SSH Keys
 

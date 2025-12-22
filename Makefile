@@ -1,7 +1,7 @@
 # Variables
 ANSIBLE_IMAGE = ansible-coolify
 DEV_CONTROLLER ?= controller.lan
-PROD_CONTROLLER ?= noc.host.uk.com
+PROD_CONTROLLER ?= controller.lan
 DOCKER_RUN_ARGS = -it --rm \
 	-v $(PWD):/ansible \
 	-v $(HOME)/.ssh:/root/.ssh:ro \
@@ -94,7 +94,7 @@ dev-sync-apps:
 
 dev-test-install-config:
 	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=development \
-		VARS="-e coolify_root_username=test -e coolify_root_user_email=test@host.uk.com -e coolify_root_user_password=Tesn735dfsd! -e coolify_autoupdate=false"
+		VARS="-e coolify_root_username=root -e coolify_root_user_email=root@localhost -e coolify_root_user_password=Host.uk.com -e coolify_autoupdate=false"
 
 dev-uninstall:
 	$(MAKE) _run-pb PB=playbooks/coolify/uninstall.yml LIMIT=development

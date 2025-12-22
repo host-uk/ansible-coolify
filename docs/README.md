@@ -22,6 +22,7 @@ This project provides a comprehensive Ansible-based automation suite for install
     - `state/`: (Ignored by git) Local store for host-specific state and backups.
 - `docs/`: Project documentation.
 - `Makefile`: Entry point for common operations.
+- `inventory.example`: Template for the server inventory.
 
 #### Prerequisites
 
@@ -37,7 +38,7 @@ This project provides a comprehensive Ansible-based automation suite for install
     ```
 
 2.  **Configure Inventory**:
-    Edit `inventory/inventory.yml` with your server details.
+    Copy `inventory.example` to `inventory/inventory.yml` and edit it with your server details.
 
 3.  **Deploy Coolify**:
     ```bash
@@ -50,7 +51,7 @@ The project defines clear personas to guide interaction with the platform:
 1.  **Developers**: For those building the platform logic.
 2.  **Product Users**: For managing applications and services.
 3.  **Platform Administrators**: For infrastructure and state management.
-4.  **Neural Network Code Assistants**: Guidelines for AI-driven development and collaboration (see [Persona: Assistant](persona_assistant.md)).
+4.  **Neural Network Code Assistants**: Guidelines for AI-driven development and collaboration (see [Persona: Assistant](../AGENTS.md)).
 
 #### Key Features
 
