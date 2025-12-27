@@ -1,0 +1,283 @@
+---
+# Environment Restore Playbook
+# Restores resources from local state/ folder to Coolify API
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/environment/restore.yml -e project=example -e env_name=lon-eu
+#
+# Options:
+#   -e dry_run=true          Show what would be restored without making changes
+#   -e restore_envs=true     Also restore environment variables (default: false)
+#   -e server_uuid=xxx       Override server for new resources
+#
+# Restores:
+#   - Services from services.json
+#   - Environment variables from *_envs.json (if restore_envs=true)
+
+- name: Restore from State
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # API settings
+    coolify_api_url: "http://172.28.0.10:8000/api/v1"
+    coolify_api_token: "cn2oEwlO2atkexV3AwlNYroVwk5IWAJxJ4umultx"
+
+    # Project/environment to restore (required via -e)
+    project: ""
+    env_name: ""
+
+    # Options
+    dry_run: false
+    restore_envs: false
+
+    # State path
+    state_path: "{{ playbook_dir }}/../../../state"
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: Validate inputs
+    # =========================================================================
+    - name: "Validate required parameters"
+      ansible.builtin.fail:
+        msg: "Both 'project' and 'env_name' are required. Use -e project=xxx -e env_name=yyy"
+      when: project == "" or env_name == ""
+
+    - name: "Check if state directory exists"
+      ansible.builtin.stat:
+        path: "{{ state_path }}/{{ project }}/{{ env_name }}"
+      register: state_dir
+
+    - name: "Fail if no local state"
+      ansible.builtin.fail:
+        msg: "No local state found at {{ state_path }}/{{ project }}/{{ env_name }}. Nothing to restore."
+      when: not state_dir.stat.exists
+
+    # =========================================================================
+    # PHASE 2: Load saved state
+    # =========================================================================
+    - name: "Load saved services state"
+      ansible.builtin.slurp:
+        src: "{{ state_path }}/{{ project }}/{{ env_name }}/services.json"
+      register: saved_services_raw
+      ignore_errors: true
+
+    - name: "Parse saved services"
+      ansible.builtin.set_fact:
+        saved_services: "{{ (saved_services_raw.content | b64decode | from_json) if saved_services_raw is success else [] }}"
+
+    - name: "Fail if no services in state"
+      ansible.builtin.fail:
+        msg: "No services found in state file. Nothing to restore."
+      when: saved_services | length == 0
+
+    - name: "Display saved state"
+      ansible.builtin.debug:
+        msg: |
+          Loaded {{ saved_services | length }} services from state:
+          {% for svc in saved_services %}
+            - {{ svc.service_type }} ({{ svc.name }})
+          {% endfor %}
+
+    # =========================================================================
+    # PHASE 3: Resolve target project and environment
+    # =========================================================================
+    - name: "Get all projects"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_projects
+
+    - name: "Find target project"
+      ansible.builtin.set_fact:
+        target_project: "{{ all_projects.json | selectattr('name', 'equalto', project) | first | default(none) }}"
+
+    - name: "Fail if project not found"
+      ansible.builtin.fail:
+        msg: "Project '{{ project }}' not found in Coolify. Create it first."
+      when: target_project is none
+
+    - name: "Get project details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ target_project.uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: project_details
+
+    - name: "Find target environment"
+      ansible.builtin.set_fact:
+        target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', env_name) | first | default(none) }}"
+
+    - name: "Fail if environment not found"
+      ansible.builtin.fail:
+        msg: "Environment '{{ env_name }}' not found in project '{{ project }}'. Create it first."
+      when: target_env is none
+
+    - name: "Get server UUID from saved state"
+      ansible.builtin.set_fact:
+        restore_server_uuid: "{{ server_uuid | default(saved_services[0].server.uuid) }}"
+
+    - name: "Display restore target"
+      ansible.builtin.debug:
+        msg: |
+          Restore Target:
+            Project: {{ project }} ({{ target_project.uuid }})
+            Environment: {{ env_name }} ({{ target_env.uuid }})
+            Server: {{ restore_server_uuid }}
+
+    # =========================================================================
+    # PHASE 4: Check existing resources
+    # =========================================================================
+    - name: "Get existing services in target environment"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_services
+
+    - name: "Filter existing services by environment"
+      ansible.builtin.set_fact:
+        existing_services: "{{ all_services.json | selectattr('environment_id', 'equalto', target_env.id) | list }}"
+        existing_service_types: "{{ all_services.json | selectattr('environment_id', 'equalto', target_env.id) | map(attribute='service_type') | list }}"
+
+    - name: "Identify services to restore"
+      ansible.builtin.set_fact:
+        services_to_restore: "{{ saved_services | rejectattr('service_type', 'in', existing_service_types) | list }}"
+        services_already_exist: "{{ saved_services | selectattr('service_type', 'in', existing_service_types) | list }}"
+
+    - name: "Display restore plan"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════╗
+          ║                        RESTORE PLAN                              ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  Target: {{ project }}/{{ env_name }}
+          ║  Mode: {{ 'DRY RUN' if dry_run | bool else 'LIVE' }}
+          ║                                                                  ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  TO RESTORE: {{ services_to_restore | length }}
+          {% for svc in services_to_restore %}
+          ║    + {{ svc.service_type }} ({{ svc.name }})
+          {% endfor %}
+          {% if services_to_restore | length == 0 %}
+          ║    (none - all services already exist)
+          {% endif %}
+          ║                                                                  ║
+          ║  ALREADY EXISTS: {{ services_already_exist | length }}
+          {% for svc in services_already_exist %}
+          ║    = {{ svc.service_type }} ({{ svc.name }})
+          {% endfor %}
+          ║                                                                  ║
+          ╚══════════════════════════════════════════════════════════════════╝
+
+    # =========================================================================
+    # PHASE 5: Restore services
+    # =========================================================================
+    - name: "Restore services"
+      when:
+        - services_to_restore | length > 0
+        - not (dry_run | bool)
+      block:
+        - name: "Create missing services"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              type: "{{ item.service_type }}"
+              project_uuid: "{{ target_project.uuid }}"
+              server_uuid: "{{ restore_server_uuid }}"
+              environment_name: "{{ env_name }}"
+              description: "{{ item.description | default(omit) }}"
+            status_code: [200, 201]
+          loop: "{{ services_to_restore }}"
+          loop_control:
+            label: "{{ item.service_type }}"
+          register: restored_services
+
+        - name: "Display restored services"
+          ansible.builtin.debug:
+            msg: |
+              Restored {{ restored_services.results | length }} services:
+              {% for result in restored_services.results %}
+              {% if result.json is defined %}
+                - {{ result.item.service_type }} -> {{ result.json.uuid }}
+              {% endif %}
+              {% endfor %}
+
+    # =========================================================================
+    # PHASE 6: Restore environment variables (optional)
+    # =========================================================================
+    - name: "Restore environment variables"
+      when:
+        - restore_envs | bool
+        - not (dry_run | bool)
+      block:
+        - name: "Find env files to restore"
+          ansible.builtin.find:
+            paths: "{{ state_path }}/{{ project }}/{{ env_name }}"
+            patterns: "*_envs.json"
+          register: env_files
+
+        - name: "Display env files found"
+          ansible.builtin.debug:
+            msg: "Found {{ env_files.matched }} environment variable files to restore"
+
+        - name: "Get current services for UUID mapping"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: current_services
+          when: env_files.matched > 0
+
+        - name: "Build service name to UUID mapping"
+          ansible.builtin.set_fact:
+            service_uuid_map: "{{ dict(current_services.json | selectattr('environment_id', 'equalto', target_env.id) | map(attribute='name') | zip(current_services.json | selectattr('environment_id', 'equalto', target_env.id) | map(attribute='uuid'))) }}"
+          when: env_files.matched > 0
+
+        - name: "Load and restore each env file"
+          ansible.builtin.include_tasks: restore_envs.yml
+          loop: "{{ env_files.files }}"
+          loop_control:
+            label: "{{ env_file.path | basename }}"
+            loop_var: env_file
+          when:
+            - env_files.matched > 0
+            - env_file.path | basename | regex_replace('_envs\\.json$', '') in service_uuid_map
+
+    # =========================================================================
+    # PHASE 7: Summary
+    # =========================================================================
+    - name: "Restore Summary"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════╗
+          ║                      RESTORE COMPLETE                            ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  Target: {{ project }}/{{ env_name }}
+          ║  Mode: {{ 'DRY RUN (no changes made)' if dry_run | bool else 'LIVE' }}
+          ║                                                                  ║
+          ║  Services restored: {{ services_to_restore | length if not (dry_run | bool) else 0 }}
+          ║  Services skipped (existed): {{ services_already_exist | length }}
+          ║  Env vars restored: {{ 'yes' if (restore_envs | bool) and not (dry_run | bool) else 'no' }}
+          ║                                                                  ║
+          {% if dry_run | bool %}
+          ║  Run without -e dry_run=true to apply changes                    ║
+          {% endif %}
+          ╚══════════════════════════════════════════════════════════════════╝

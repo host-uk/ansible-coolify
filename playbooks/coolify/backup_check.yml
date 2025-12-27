@@ -1,0 +1,271 @@
+---
+# Backup Detection Playbook
+# Compares local state/ files against live API to detect resources needing backup
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/backup_check.yml -e project=example -e env_name=production
+#
+# Reports:
+#   - NEW: Resources in API not in local state (need initial backup)
+#   - MODIFIED: Resources with changed updated_at timestamp (need re-backup)
+#   - DELETED: Resources in local state but not in API (warning)
+#   - UNCHANGED: Resources that match
+
+- name: Backup Detection Check
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # API settings
+    coolify_api_url: "http://172.28.0.10:8000/api/v1"
+    coolify_api_token: "cn2oEwlO2atkexV3AwlNYroVwk5IWAJxJ4umultx"
+
+    # Project/environment to check (can override via -e)
+    project: "example"
+    env_name: "production"
+
+    # State path
+    state_path: "{{ playbook_dir }}/../../state"
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: Load local state
+    # =========================================================================
+    - name: "Check if state directory exists"
+      ansible.builtin.stat:
+        path: "{{ state_path }}/{{ project }}/{{ env_name }}"
+      register: state_dir
+
+    - name: "Fail if no local state"
+      ansible.builtin.fail:
+        msg: "No local state found at {{ state_path }}/{{ project }}/{{ env_name }}. Run sync first."
+      when: not state_dir.stat.exists
+
+    - name: "Load saved services state"
+      ansible.builtin.slurp:
+        src: "{{ state_path }}/{{ project }}/{{ env_name }}/services.json"
+      register: saved_services_raw
+      ignore_errors: true
+
+    - name: "Parse saved services"
+      ansible.builtin.set_fact:
+        saved_services: "{{ (saved_services_raw.content | b64decode | from_json) if saved_services_raw is success else [] }}"
+
+    - name: "Build saved services lookup"
+      ansible.builtin.set_fact:
+        saved_services_by_uuid: "{{ dict(saved_services | map(attribute='uuid') | zip(saved_services)) }}"
+        saved_service_timestamps: "{{ dict(saved_services | map(attribute='uuid') | zip(saved_services | map(attribute='updated_at'))) }}"
+
+    - name: "Display loaded state"
+      ansible.builtin.debug:
+        msg: "Loaded {{ saved_services | length }} services from local state"
+
+    # =========================================================================
+    # PHASE 2: Fetch live state from API
+    # =========================================================================
+    - name: "Resolve project UUID"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_projects
+
+    - name: "Find project"
+      ansible.builtin.set_fact:
+        target_project: "{{ all_projects.json | selectattr('name', 'equalto', project) | first | default(none) }}"
+
+    - name: "Fail if project not found"
+      ansible.builtin.fail:
+        msg: "Project '{{ project }}' not found"
+      when: target_project is none
+
+    - name: "Get project details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ target_project.uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: project_details
+
+    - name: "Find environment"
+      ansible.builtin.set_fact:
+        target_env: "{{ project_details.json.environments | selectattr('name', 'equalto', env_name) | first | default(none) }}"
+
+    - name: "Get all live services"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_services
+
+    - name: "Filter services for target environment"
+      ansible.builtin.set_fact:
+        live_services: "{{ all_services.json | selectattr('environment_id', 'equalto', target_env.id) | list if target_env else [] }}"
+
+    - name: "Build live services lookup"
+      ansible.builtin.set_fact:
+        live_services_by_uuid: "{{ dict(live_services | map(attribute='uuid') | zip(live_services)) }}"
+        live_service_timestamps: "{{ dict(live_services | map(attribute='uuid') | zip(live_services | map(attribute='updated_at'))) }}"
+
+    - name: "Display live state"
+      ansible.builtin.debug:
+        msg: "Found {{ live_services | length }} services in live API"
+
+    # =========================================================================
+    # PHASE 3: Compare states
+    # =========================================================================
+    - name: "Identify NEW services (in API, not in state)"
+      ansible.builtin.set_fact:
+        new_services: "{{ live_services | rejectattr('uuid', 'in', saved_services_by_uuid.keys() | list) | list }}"
+
+    - name: "Identify DELETED services (in state, not in API)"
+      ansible.builtin.set_fact:
+        deleted_services: "{{ saved_services | rejectattr('uuid', 'in', live_services_by_uuid.keys() | list) | list }}"
+
+    - name: "Identify MODIFIED services (updated_at changed)"
+      ansible.builtin.set_fact:
+        modified_services: >-
+          {{
+            live_services
+            | selectattr('uuid', 'in', saved_services_by_uuid.keys() | list)
+            | selectattr('updated_at', 'defined')
+            | rejectattr('updated_at', 'in', saved_service_timestamps.values() | list)
+            | list
+          }}
+
+    - name: "Identify UNCHANGED services"
+      ansible.builtin.set_fact:
+        unchanged_services: >-
+          {{
+            live_services
+            | selectattr('uuid', 'in', saved_services_by_uuid.keys() | list)
+            | selectattr('updated_at', 'defined')
+            | selectattr('updated_at', 'in', saved_service_timestamps.values() | list)
+            | list
+          }}
+
+    # =========================================================================
+    # PHASE 4: Report results
+    # =========================================================================
+    - name: "Calculate backup status"
+      ansible.builtin.set_fact:
+        needs_backup: "{{ (new_services | length > 0) or (modified_services | length > 0) }}"
+        has_deletions: "{{ deleted_services | length > 0 }}"
+
+    - name: "Display backup check results"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════╗
+          ║                    BACKUP CHECK RESULTS                          ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  Project: {{ project }}/{{ env_name }}
+          ║  State Path: {{ state_path }}/{{ project }}/{{ env_name }}
+          ║                                                                  ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║  LOCAL STATE: {{ saved_services | length }} services
+          ║  LIVE API:    {{ live_services | length }} services
+          ║                                                                  ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  ✅ UNCHANGED: {{ unchanged_services | length }}
+          {% for svc in unchanged_services %}
+          ║     - {{ svc.service_type }} ({{ svc.uuid }})
+          {% endfor %}
+          ║                                                                  ║
+          {% if new_services | length > 0 %}
+          ║  🆕 NEW (need backup): {{ new_services | length }}
+          {% for svc in new_services %}
+          ║     - {{ svc.service_type }} ({{ svc.uuid }})
+          {% endfor %}
+          ║                                                                  ║
+          {% endif %}
+          {% if modified_services | length > 0 %}
+          ║  📝 MODIFIED (need re-backup): {{ modified_services | length }}
+          {% for svc in modified_services %}
+          ║     - {{ svc.service_type }} ({{ svc.uuid }})
+          ║       Saved: {{ saved_service_timestamps[svc.uuid] | default('unknown') }}
+          ║       Live:  {{ svc.updated_at }}
+          {% endfor %}
+          ║                                                                  ║
+          {% endif %}
+          {% if deleted_services | length > 0 %}
+          ║  ⚠️  DELETED (in state but not API): {{ deleted_services | length }}
+          {% for svc in deleted_services %}
+          ║     - {{ svc.service_type }} ({{ svc.uuid }})
+          {% endfor %}
+          ║                                                                  ║
+          {% endif %}
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  STATUS: {{ '🔴 BACKUP NEEDED' if needs_backup else '🟢 UP TO DATE' }}
+          {% if has_deletions %}
+          ║  WARNING: {{ deleted_services | length }} resources deleted from API
+          {% endif %}
+          ║                                                                  ║
+          ╚══════════════════════════════════════════════════════════════════╝
+
+    # =========================================================================
+    # PHASE 5: Optional - Auto-backup if needed
+    # =========================================================================
+    - name: "Backup new/modified services"
+      when:
+        - needs_backup
+        - auto_backup | default(false) | bool
+      block:
+        - name: "Update services.json with current state"
+          ansible.builtin.copy:
+            content: "{{ live_services | to_nice_json }}"
+            dest: "{{ state_path }}/{{ project }}/{{ env_name }}/services.json"
+            mode: '0644'
+
+        - name: "Backup environment variables for new/modified services"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services/{{ item.uuid }}/envs"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: [200, 404]
+          loop: "{{ new_services + modified_services }}"
+          loop_control:
+            label: "{{ item.service_type }}"
+          register: service_envs_backup
+
+        - name: "Save environment variables"
+          ansible.builtin.copy:
+            content: "{{ item.json | to_nice_json }}"
+            dest: "{{ state_path }}/{{ project }}/{{ env_name }}/{{ item.item.name }}_envs.json"
+            mode: '0600'
+          loop: "{{ service_envs_backup.results }}"
+          loop_control:
+            label: "{{ item.item.name | default('unknown') }}"
+          when: item.status == 200
+
+        - name: "Record backup timestamp"
+          ansible.builtin.copy:
+            content: |
+              {
+                "last_backup": "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -Iseconds')) }}",
+                "services_backed_up": {{ (new_services + modified_services) | map(attribute='uuid') | list | to_json }},
+                "total_services": {{ live_services | length }}
+              }
+            dest: "{{ state_path }}/{{ project }}/{{ env_name }}/last_backup.json"
+            mode: '0644'
+
+        - name: "Backup complete"
+          ansible.builtin.debug:
+            msg: "Backed up {{ (new_services + modified_services) | length }} services to {{ state_path }}/{{ project }}/{{ env_name }}/"
+
+    - name: "Set exit status"
+      ansible.builtin.set_fact:
+        backup_check_result:
+          needs_backup: "{{ needs_backup }}"
+          new_count: "{{ new_services | length }}"
+          modified_count: "{{ modified_services | length }}"
+          deleted_count: "{{ deleted_services | length }}"
+          unchanged_count: "{{ unchanged_services | length }}"

@@ -1,0 +1,54 @@
+---
+# Restore environment variables for a single service
+# Called from restore.yml with env_file variable
+
+- name: "Load env file content"
+  ansible.builtin.slurp:
+    src: "{{ env_file.path }}"
+  register: env_content
+
+- name: "Parse env variables"
+  ansible.builtin.set_fact:
+    env_vars: "{{ env_content.content | b64decode | from_json }}"
+    service_name: "{{ env_file.path | basename | regex_replace('_envs\\.json$', '') }}"
+
+- name: "Get service UUID"
+  ansible.builtin.set_fact:
+    target_service_uuid: "{{ service_uuid_map[service_name] }}"
+
+- name: "Display env restore info"
+  ansible.builtin.debug:
+    msg: "Restoring {{ env_vars | length }} env vars for {{ service_name }} ({{ target_service_uuid }})"
+
+- name: "Restore each environment variable"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ target_service_uuid }}/envs"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      key: "{{ item.key }}"
+      value: "{{ item.value | default('') }}"
+      is_build_time: "{{ item.is_buildtime | default(true) }}"
+    status_code: [200, 201, 409, 422]
+  loop: "{{ env_vars }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - item.is_coolify is not defined or not item.is_coolify
+  register: env_var_results
+  ignore_errors: true
+
+- name: "Count successful restores"
+  ansible.builtin.set_fact:
+    successful_restores: "{{ env_var_results.results | selectattr('status', 'defined') | list | length }}"
+    user_env_count: "{{ env_vars | rejectattr('is_coolify', 'equalto', true) | list | length }}"
+    coolify_env_count: "{{ env_vars | selectattr('is_coolify', 'equalto', true) | list | length }}"
+
+- name: "Display env var restore results"
+  ansible.builtin.debug:
+    msg: |
+      Restored {{ successful_restores }} of {{ user_env_count }} user env vars
+      (Skipped {{ coolify_env_count }} Coolify-managed vars)
