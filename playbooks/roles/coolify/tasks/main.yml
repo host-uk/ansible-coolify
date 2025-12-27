@@ -126,3 +126,6 @@
         coolify_key_name: "host.docker.internal"
         coolify_save_to_state: true
 
+    - name: Generate onboarding URL and finalize setup
+      ansible.builtin.include_tasks: onboarding_url.yml
+

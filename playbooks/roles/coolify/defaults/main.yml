@@ -32,7 +32,8 @@ coolify_key_name: "{{ inventory_hostname }}"
 coolify_auto_setup_enabled: true
 
 # API settings
-coolify_api_base_url: "http://{{ 'host.docker.internal' if (inventory_hostname in (groups['controller'] | default([])) or inventory_hostname == 'noc.host.uk.com') else (hostvars[groups['controller'] | first]['ansible_host'] if groups['controller'] | default([]) | length > 0 else ansible_host) }}:8000/api/v1"
+coolify_base_url: "http://{{ 'host.docker.internal' if (inventory_hostname in (groups['controller'] | default([])) or inventory_hostname == 'noc.host.uk.com') else (hostvars[groups['controller'] | first]['ansible_host'] if groups['controller'] | default([]) | length > 0 else ansible_host) }}:8000"
+coolify_api_base_url: "{{ coolify_base_url }}/api/v1"
 
 # State path (relative to inventory)
 coolify_state_path: "{{ inventory_dir }}/../state"

@@ -1,0 +1,113 @@
+---
+# Generate onboarding URL with correct parameters for first-time Coolify setup
+# This task should be run after Coolify installation
+
+- name: Get onboarding parameters from Coolify database
+  ansible.builtin.shell: |
+    {{ 'docker exec coolify-dev-controller ' if docker_dev_enabled | default(false) else '' }}docker exec coolify php artisan tinker --execute='
+    try {
+        $user = \App\Models\User::first();
+        $team = $user ? $user->teams()->first() : null;
+
+        // Fix team_id=0 issue (resources created before user setup)
+        if ($team) {
+            \App\Models\Server::where("team_id", 0)->update(["team_id" => $team->id]);
+            \App\Models\PrivateKey::where("team_id", 0)->update(["team_id" => $team->id]);
+
+            // Create default project if none exists
+            $project = \App\Models\Project::where("team_id", $team->id)->first();
+            if (!$project) {
+                $project = \App\Models\Project::create([
+                    "name" => "Default Project",
+                    "description" => "Default project",
+                    "team_id" => $team->id,
+                ]);
+                \App\Models\Environment::create([
+                    "name" => "production",
+                    "project_id" => $project->id,
+                ]);
+            }
+
+            // Disable onboarding screen
+            $team->show_boarding = false;
+            $team->save();
+        }
+
+        // Get IDs for URL
+        $server = \App\Models\Server::first();
+        $key = \App\Models\PrivateKey::first();
+        $project = \App\Models\Project::first();
+
+        // Mark server as usable
+        if ($server && $server->settings) {
+            $server->settings->is_reachable = true;
+            $server->settings->is_usable = true;
+            $server->settings->save();
+        }
+
+        $result = [
+            "server_id" => $server ? $server->id : "",
+            "server_type" => $server ? $server->ip : "host.docker.internal",
+            "key_id" => $key ? $key->id : "",
+            "project_id" => $project ? $project->id : "",
+            "onboarding_disabled" => $team ? !$team->show_boarding : false,
+        ];
+
+        echo json_encode($result);
+    } catch (\Exception $e) {
+        echo json_encode(["error" => $e->getMessage()]);
+    }
+    '
+  register: onboarding_params_raw
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Parse onboarding parameters
+  ansible.builtin.set_fact:
+    onboarding_params: "{{ onboarding_params_raw.stdout | from_json }}"
+  when:
+    - onboarding_params_raw is defined
+    - onboarding_params_raw.stdout is defined
+
+- name: Build onboarding URL
+  ansible.builtin.set_fact:
+    coolify_onboarding_url: "{{ coolify_base_url }}/onboarding?selectedServerType={{ onboarding_params.server_type }}&selectedExistingPrivateKey={{ onboarding_params.key_id }}&privateKeyType=existing&selectedExistingServer={{ onboarding_params.server_id }}&selectedProject={{ onboarding_params.project_id }}&step=select-server-type"
+  when:
+    - onboarding_params is defined
+    - onboarding_params.error is not defined
+
+- name: Display onboarding information
+  ansible.builtin.debug:
+    msg: |
+
+      ╔══════════════════════════════════════════════════════════════════╗
+      ║                    COOLIFY SETUP COMPLETE                        ║
+      ╠══════════════════════════════════════════════════════════════════╣
+      ║                                                                  ║
+      ║  Dashboard: {{ coolify_base_url | default('http://localhost:8000') }}
+      ║                                                                  ║
+      ║  Onboarding: {{ 'SKIPPED (already configured)' if onboarding_params.onboarding_disabled else 'Required' }}
+      ║                                                                  ║
+      {% if not onboarding_params.onboarding_disabled %}
+      ║  Complete setup at:                                              ║
+      ║  {{ coolify_onboarding_url }}
+      ║                                                                  ║
+      {% endif %}
+      ║  API Token: Saved to /data/coolify/ansible-token                 ║
+      ║                                                                  ║
+      ║  Resources:                                                      ║
+      ║    Server ID: {{ onboarding_params.server_id }}
+      ║    Private Key ID: {{ onboarding_params.key_id }}
+      ║    Project ID: {{ onboarding_params.project_id }}
+      ║                                                                  ║
+      ╚══════════════════════════════════════════════════════════════════╝
+  when: onboarding_params is defined
+
+- name: Save onboarding URL to state
+  ansible.builtin.copy:
+    content: "{{ coolify_onboarding_url }}"
+    dest: /data/coolify/onboarding-url
+    mode: '0644'
+  when:
+    - coolify_onboarding_url is defined
+    - not ansible_check_mode
