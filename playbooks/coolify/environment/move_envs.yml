@@ -1,0 +1,45 @@
+---
+# Copy environment variables during move operation
+# Called from move.yml with env_result variable
+
+- name: "Get target service UUID"
+  ansible.builtin.set_fact:
+    target_svc_uuid: "{{ target_uuid_map[env_result.item.service_type] }}"
+
+- name: "Filter user env vars (exclude Coolify-managed)"
+  ansible.builtin.set_fact:
+    user_env_vars: "{{ env_result.json | rejectattr('is_coolify', 'equalto', true) | list }}"
+
+- name: "Display env copy info"
+  ansible.builtin.debug:
+    msg: "Copying {{ user_env_vars | length }} env vars for {{ env_result.item.service_type }}"
+  when: user_env_vars | length > 0
+
+- name: "Copy each environment variable"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ target_svc_uuid }}/envs"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      key: "{{ item.key }}"
+      value: "{{ item.value | default('') }}"
+    status_code: [200, 201, 409, 422]
+  loop: "{{ user_env_vars }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: env_copy_results
+  ignore_errors: true
+  when: user_env_vars | length > 0
+
+- name: "Count successful copies"
+  ansible.builtin.set_fact:
+    copied_count: "{{ env_copy_results.results | default([]) | selectattr('status', 'defined') | list | length }}"
+  when: user_env_vars | length > 0
+
+- name: "Display copy results"
+  ansible.builtin.debug:
+    msg: "Copied {{ copied_count }} env vars to {{ env_result.item.service_type }}"
+  when: user_env_vars | length > 0
