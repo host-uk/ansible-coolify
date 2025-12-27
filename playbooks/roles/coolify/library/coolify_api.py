@@ -184,7 +184,8 @@ def run_module():
                 break
 
     except CoolifyError as e:
-        module.fail_json(msg=str(e), **result)
+        result['msg'] = str(e)
+        module.fail_json(**result)
     except Exception as e:
         module.fail_json(msg=f'Unexpected error: {str(e)}', **result)
 

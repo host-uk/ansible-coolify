@@ -325,7 +325,8 @@ def run_module():
                 result['msg'] = f"Validation started for server '{name}'"
 
     except Exception as e:
-        module.fail_json(msg=str(e), **result)
+        result['msg'] = str(e)
+        module.fail_json(**result)
 
     module.exit_json(**result)
 

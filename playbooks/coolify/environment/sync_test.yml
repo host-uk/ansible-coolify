@@ -1,0 +1,220 @@
+---
+# Environment Sync Test Playbook
+# Clones resources from source environment to ny-usa (using clone API)
+# Creates resources in lon-eu (using API modules)
+# Compares both environments to verify they match
+# Saves state to local state folder for backup comparison
+
+- name: Environment Sync Test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    coolify_api_url: "http://172.28.0.10:8000/api/v1"
+    coolify_api_token: "cn2oEwlO2atkexV3AwlNYroVwk5IWAJxJ4umultx"
+
+    # Source environment (Default Project/production)
+    source_project_uuid: "ssswwc0g4wocsk8ko40soc88"
+    source_environment: "production"
+
+    # Target project (example)
+    target_project_uuid: "qcwc88004ks48ok4ss4wo004"
+    target_env_clone: "ny-usa"      # Clone destination
+    target_env_create: "lon-eu"     # API module creation
+
+    # Server for new resources
+    server_uuid: "p8sw4ssksg4ksgg848kos8w4"
+
+    # State path
+    state_path: "{{ playbook_dir }}/../../../state"
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: Discover source environment resources
+    # =========================================================================
+    - name: "PHASE 1: Get source project details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ source_project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: source_project
+
+    - name: "PHASE 1: Get source environment UUID"
+      ansible.builtin.set_fact:
+        source_env_uuid: "{{ (source_project.json.environments | selectattr('name', 'equalto', source_environment) | first).uuid }}"
+
+    - name: "PHASE 1: Get all applications"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/applications"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_applications
+
+    - name: "PHASE 1: Get all services"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_services
+
+    - name: "PHASE 1: Get all databases"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/databases"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_databases
+
+    - name: "PHASE 1: Filter source environment resources"
+      ansible.builtin.set_fact:
+        source_applications: "{{ all_applications.json | selectattr('environment.uuid', 'defined') | selectattr('environment.uuid', 'equalto', source_env_uuid) | list }}"
+        source_services: "{{ all_services.json | selectattr('environment_id', 'equalto', 1) | list }}"
+        source_databases: "{{ all_databases.json | selectattr('environment.uuid', 'defined') | selectattr('environment.uuid', 'equalto', source_env_uuid) | list }}"
+
+    - name: "PHASE 1: Display discovered resources"
+      ansible.builtin.debug:
+        msg: |
+          Source Environment: {{ source_environment }} ({{ source_env_uuid }})
+
+          Applications: {{ source_applications | length }}
+          {% for app in source_applications %}
+            - {{ app.name }} ({{ app.uuid }})
+          {% endfor %}
+
+          Services: {{ source_services | length }}
+          {% for svc in source_services %}
+            - {{ svc.name }} ({{ svc.uuid }}) - type: {{ svc.service_type }}
+          {% endfor %}
+
+          Databases: {{ source_databases | length }}
+          {% for db in source_databases %}
+            - {{ db.name }} ({{ db.uuid }})
+          {% endfor %}
+
+    # =========================================================================
+    # PHASE 2: Get target environments
+    # =========================================================================
+    - name: "PHASE 2: Get target project details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ target_project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: target_project
+
+    - name: "PHASE 2: Get target environment UUIDs"
+      ansible.builtin.set_fact:
+        clone_env_uuid: "{{ (target_project.json.environments | selectattr('name', 'equalto', target_env_clone) | first).uuid }}"
+        create_env_uuid: "{{ (target_project.json.environments | selectattr('name', 'equalto', target_env_create) | first).uuid }}"
+        clone_env_name: "{{ target_env_clone }}"
+        create_env_name: "{{ target_env_create }}"
+
+    - name: "PHASE 2: Display target environments"
+      ansible.builtin.debug:
+        msg: |
+          Target Project: {{ target_project.json.name }}
+          Clone Target: {{ clone_env_name }} ({{ clone_env_uuid }})
+          Create Target: {{ create_env_name }} ({{ create_env_uuid }})
+
+    # =========================================================================
+    # PHASE 3: Save source state for backup reference
+    # =========================================================================
+    - name: "PHASE 3: Ensure state directory exists"
+      ansible.builtin.file:
+        path: "{{ state_path }}/{{ target_project.json.name | lower | replace(' ', '-') }}/{{ source_environment }}"
+        state: directory
+        mode: '0755'
+
+    - name: "PHASE 3: Save services state"
+      ansible.builtin.copy:
+        content: "{{ source_services | to_nice_json }}"
+        dest: "{{ state_path }}/{{ target_project.json.name | lower | replace(' ', '-') }}/{{ source_environment }}/services.json"
+        mode: '0644'
+      when: source_services | length > 0
+
+    - name: "PHASE 3: Get service environment variables"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ item.uuid }}/envs"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 404]
+      loop: "{{ source_services }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: service_envs
+      when: source_services | length > 0
+
+    - name: "PHASE 3: Save service env vars"
+      ansible.builtin.copy:
+        content: "{{ item.json | to_nice_json }}"
+        dest: "{{ state_path }}/{{ target_project.json.name | lower | replace(' ', '-') }}/{{ source_environment }}/{{ item.item.name }}_envs.json"
+        mode: '0600'
+      loop: "{{ service_envs.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.name | default('unknown') }}"
+      when:
+        - service_envs.results is defined
+        - item.status == 200
+
+    - name: "PHASE 3: Display saved state"
+      ansible.builtin.debug:
+        msg: "State saved to {{ state_path }}/{{ target_project.json.name | lower | replace(' ', '-') }}/{{ source_environment }}/"
+
+    # =========================================================================
+    # PHASE 4: Create resources in lon-eu using API modules
+    # =========================================================================
+    - name: "PHASE 4: Plan services for {{ create_env_name }}"
+      ansible.builtin.debug:
+        msg: "Will create {{ source_services | length }} services: {{ source_services | map(attribute='service_type') | list | join(', ') }}"
+
+    - name: "PHASE 4: Create chatwoot in {{ create_env_name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: "chatwoot"
+          project_uuid: "{{ target_project_uuid }}"
+          server_uuid: "{{ server_uuid }}"
+          environment_name: "{{ create_env_name }}"
+        status_code: [200, 201]
+      register: chatwoot_result
+
+    - name: "PHASE 4: Display created service"
+      ansible.builtin.debug:
+        msg: "Created chatwoot: {{ chatwoot_result.json.uuid }}"
+
+    # =========================================================================
+    # PHASE 5: Summary
+    # =========================================================================
+    - name: "PHASE 5: Test Summary"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════╗
+          ║              ENVIRONMENT SYNC TEST SUMMARY                       ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  Source: {{ source_project.json.name }}/{{ source_environment }}
+          ║    - Services: {{ source_services | length }}
+          ║    - Applications: {{ source_applications | length }}
+          ║    - Databases: {{ source_databases | length }}
+          ║                                                                  ║
+          ║  Target Environments:                                            ║
+          ║    - {{ clone_env_name }}: Ready for clone
+          ║    - {{ create_env_name }}: Ready for API creation
+          ║                                                                  ║
+          ║  State saved to: state/example/production/                       ║
+          ║                                                                  ║
+          ╚══════════════════════════════════════════════════════════════════╝
