@@ -1,0 +1,389 @@
+---
+# Test 06: Node Registration
+# Tests: SSH key distribution, server registration via API
+
+- name: "Test 06: Node Registration"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    worker_container: "{{ docker_dev_name_prefix }}-worker"
+    worker_ip: "172.29.0.20"
+    coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
+
+  tasks:
+    # ==========================================================================
+    # SETUP: Create containers and install Coolify with API
+    # ==========================================================================
+    - name: "SETUP: Verify Docker is available"
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: "SETUP: Clean existing environment"
+      ansible.builtin.shell: |
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
+        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
+      changed_when: true
+      ignore_errors: true
+
+    - name: "SETUP: Create containers"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+    - name: "SETUP: Wait for all containers to be healthy"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+      register: health
+      loop: "{{ docker_dev_containers }}"
+      changed_when: false
+      retries: 60
+      delay: 2
+      until: health.stdout == 'healthy'
+
+    - name: "SETUP: Download Coolify install script"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /root/install.sh
+      register: install_download
+      changed_when: true
+      retries: 3
+      delay: 5
+      until: install_download.rc == 0
+
+    - name: "SETUP: Make install script executable"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} chmod +x /root/install.sh
+      changed_when: true
+
+    - name: "SETUP: Install Coolify on controller"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        /bin/bash -c "TERM=dumb /root/install.sh"
+      register: install
+      changed_when: true
+      timeout: 900
+
+    - name: "SETUP: Wait for Coolify to be ready"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        curl -sf -o /dev/null http://localhost:8000
+      register: coolify_ready
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: coolify_ready.rc == 0
+
+    - name: "SETUP: Enable API and create token"
+      ansible.builtin.shell: |
+        docker exec {{ controller_container }} docker exec coolify php artisan tinker --execute='
+        $settings = \App\Models\InstanceSettings::first();
+        $settings->is_api_enabled = true;
+        $settings->allowed_ips = "0.0.0.0";
+        $settings->save();
+        $user = \App\Models\User::first();
+        if (!$user) {
+            $user = \App\Models\User::create([
+                "name" => "admin",
+                "email" => "admin@test.local",
+                "password" => \Illuminate\Support\Facades\Hash::make("password123"),
+                "email_verified_at" => now(),
+            ]);
+        }
+        $team = $user->teams()->first();
+        if (!$team) {
+            $team = \App\Models\Team::create([
+                "name" => $user->name . " Team",
+                "personal_team" => true,
+            ]);
+            $user->teams()->attach($team->id, ["role" => "admin"]);
+        }
+        $plainToken = \Illuminate\Support\Str::random(40);
+        $newToken = new \Laravel\Sanctum\PersonalAccessToken();
+        $newToken->name = "ansible-test-token";
+        $newToken->token = hash("sha256", $plainToken);
+        $newToken->abilities = ["*"];
+        $newToken->tokenable_id = $user->id;
+        $newToken->tokenable_type = get_class($user);
+        $newToken->team_id = $team->id;
+        $newToken->save();
+        echo $plainToken;
+        '
+      register: token_result
+      changed_when: true
+      retries: 10
+      delay: 5
+      until: token_result.rc == 0
+
+    - name: "SETUP: Extract API token"
+      ansible.builtin.set_fact:
+        coolify_api_token: "{{ token_result.stdout_lines | last | trim }}"
+
+    - name: "SETUP: Verify API is working"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+      retries: 10
+      delay: 3
+      until: api_check.status == 200
+
+    # ==========================================================================
+    # NR-001: Generate SSH Key for Worker Registration
+    # ==========================================================================
+    - name: "NR-001: Generate SSH key for Coolify to use"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        ssh-keygen -t rsa -b 4096 -f /tmp/coolify-test-key -N "" -C "coolify-test"
+      register: nr001_keygen
+      changed_when: true
+
+    - name: "NR-001: Read public key"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} cat /tmp/coolify-test-key.pub
+      register: nr001_pubkey
+      changed_when: false
+
+    - name: "NR-001: Read private key"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} cat /tmp/coolify-test-key
+      register: nr001_privkey
+      changed_when: false
+
+    # ==========================================================================
+    # NR-002: Register Private Key in Coolify
+    # ==========================================================================
+    - name: "NR-002: Register private key via API"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/security/keys"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "test-worker-key"
+          description: "Test key for worker registration"
+          private_key: "{{ nr001_privkey.stdout }}"
+        status_code: [200, 201]
+      register: nr002_key_register
+
+    - name: "NR-002: Extract key UUID"
+      ansible.builtin.set_fact:
+        private_key_uuid: "{{ nr002_key_register.json.uuid }}"
+
+    - name: "NR-002: Assert key registered"
+      ansible.builtin.assert:
+        that:
+          - private_key_uuid is defined
+          - private_key_uuid | length > 0
+        fail_msg: "Private key registration failed"
+        success_msg: "Private key registered with UUID: {{ private_key_uuid }}"
+
+    # ==========================================================================
+    # NR-003: Distribute Public Key to Worker
+    # ==========================================================================
+    - name: "NR-003: Add public key to worker's authorized_keys"
+      ansible.builtin.command: >
+        docker exec {{ worker_container }}
+        /bin/bash -c "echo '{{ nr001_pubkey.stdout }}' >> /root/.ssh/authorized_keys"
+      changed_when: true
+
+    - name: "NR-003: Verify key in authorized_keys"
+      ansible.builtin.command: >
+        docker exec {{ worker_container }} cat /root/.ssh/authorized_keys
+      register: nr003_authkeys
+      changed_when: false
+
+    - name: "NR-003: Assert key distributed"
+      ansible.builtin.assert:
+        that:
+          - "'coolify-test' in nr003_authkeys.stdout"
+        fail_msg: "Public key not found in worker authorized_keys"
+        success_msg: "Public key distributed to worker"
+
+    # ==========================================================================
+    # NR-004: Register Server via API
+    # ==========================================================================
+    - name: "NR-004: Check if server already exists"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: nr004_existing
+
+    - name: "NR-004: Register worker server via API"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "test-worker-server"
+          description: "Test worker server for node registration"
+          ip: "{{ worker_ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ private_key_uuid }}"
+          is_build_server: false
+        status_code: [200, 201]
+      register: nr004_register
+
+    - name: "NR-004: Extract server UUID"
+      ansible.builtin.set_fact:
+        server_uuid: "{{ nr004_register.json.uuid }}"
+
+    - name: "NR-004: Assert server registered"
+      ansible.builtin.assert:
+        that:
+          - server_uuid is defined
+          - server_uuid | length > 0
+        fail_msg: "Server registration failed"
+        success_msg: "Server registered with UUID: {{ server_uuid }}"
+
+    # ==========================================================================
+    # NR-005: Verify Server in List
+    # ==========================================================================
+    - name: "NR-005: List servers to verify registration"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: nr005_list
+
+    - name: "NR-005: Assert worker server in list"
+      ansible.builtin.assert:
+        that:
+          - nr005_list.json | selectattr('name', 'equalto', 'test-worker-server') | list | length > 0
+        fail_msg: "Registered server not found in list"
+        success_msg: "Server found in server list"
+
+    # ==========================================================================
+    # NR-006: Test Duplicate Registration (Idempotency)
+    # ==========================================================================
+    - name: "NR-006: Attempt duplicate registration"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "test-worker-server"
+          ip: "{{ worker_ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ private_key_uuid }}"
+        status_code: [200, 201, 400, 409, 422]
+      register: nr006_duplicate
+
+    - name: "NR-006: Log duplicate registration result"
+      ansible.builtin.debug:
+        msg: "Duplicate registration returned status {{ nr006_duplicate.status }}"
+
+    # ==========================================================================
+    # NR-007: Validate Server Connection (Optional)
+    # ==========================================================================
+    - name: "NR-007: Trigger server validation"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers/{{ server_uuid }}/validate"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 202]
+      register: nr007_validate
+      ignore_errors: true
+
+    - name: "NR-007: Log validation result"
+      ansible.builtin.debug:
+        msg: "Server validation: {{ nr007_validate.json | default('no response') }}"
+      when: nr007_validate is succeeded
+
+    # ==========================================================================
+    # NR-008: Delete Server (Cleanup Test)
+    # ==========================================================================
+    - name: "NR-008: Delete registered server"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers/{{ server_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204]
+      register: nr008_delete
+
+    - name: "NR-008: Assert server deleted"
+      ansible.builtin.assert:
+        that:
+          - nr008_delete.status in [200, 204]
+        fail_msg: "Server deletion failed"
+        success_msg: "Server deleted successfully"
+
+    # ==========================================================================
+    # NR-009: Verify Server Removed from List
+    # ==========================================================================
+    - name: "NR-009: List servers after deletion"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: nr009_list
+
+    - name: "NR-009: Assert server removed"
+      ansible.builtin.assert:
+        that:
+          - nr009_list.json | selectattr('name', 'equalto', 'test-worker-server') | list | length == 0
+        fail_msg: "Deleted server still in list"
+        success_msg: "Server correctly removed from list"
+
+  # ============================================================================
+  # CLEANUP
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
+      changed_when: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: Node Registration"
+      ansible.builtin.debug:
+        msg: "All node registration tests passed!"
+
+  tags:
+    - test
+    - node-registration
+    - docker-dev

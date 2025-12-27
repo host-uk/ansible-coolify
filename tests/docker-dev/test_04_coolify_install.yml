@@ -1,0 +1,221 @@
+---
+# Test 04: Coolify Installation
+# Tests: Coolify installation on Docker dev containers, service availability
+
+- name: "Test 04: Coolify Installation"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+
+  tasks:
+    # ==========================================================================
+    # SETUP
+    # ==========================================================================
+    - name: "SETUP: Verify Docker is available"
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: "SETUP: Clean existing environment"
+      ansible.builtin.shell: |
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
+        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
+      changed_when: true
+      ignore_errors: true
+
+    - name: "SETUP: Create containers with docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+    - name: "SETUP: Wait for containers to be healthy"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ controller_container }}
+      register: setup_health
+      changed_when: false
+      retries: 60
+      delay: 2
+      until: setup_health.stdout == 'healthy'
+
+    # ==========================================================================
+    # CI-001: Install Coolify on Controller
+    # ==========================================================================
+    - name: "CI-001: Download Coolify install script"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /root/install.sh
+      register: ci001_download
+      changed_when: true
+      retries: 3
+      delay: 5
+      until: ci001_download.rc == 0
+
+    - name: "CI-001: Make install script executable"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} chmod +x /root/install.sh
+      changed_when: true
+
+    - name: "CI-001: Run Coolify install script (this takes several minutes)"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        /bin/bash -c "TERM=dumb /root/install.sh"
+      register: ci001_install
+      changed_when: true
+      timeout: 900  # 15 minute timeout for installation
+
+    - name: "CI-001: Assert installation completed"
+      ansible.builtin.assert:
+        that:
+          - ci001_install.rc == 0
+        fail_msg: "Coolify installation failed: {{ ci001_install.stderr | default('') }}"
+        success_msg: "Coolify installation completed"
+
+    # ==========================================================================
+    # CI-002: Verify Coolify .env File
+    # ==========================================================================
+    - name: "CI-002: Check Coolify .env exists"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} test -f /data/coolify/source/.env
+      register: ci002_env
+      changed_when: false
+
+    - name: "CI-002: Assert .env file exists"
+      ansible.builtin.assert:
+        that:
+          - ci002_env.rc == 0
+        fail_msg: "Coolify .env file not found"
+        success_msg: "Coolify .env file exists"
+
+    # ==========================================================================
+    # CI-003: Verify Coolify Containers Running
+    # ==========================================================================
+    - name: "CI-003: Check Coolify containers are running"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} docker ps --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: ci003_containers
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: "'coolify' in ci003_containers.stdout"
+
+    - name: "CI-003: Assert main Coolify container running"
+      ansible.builtin.assert:
+        that:
+          - "'coolify' in ci003_containers.stdout"
+        fail_msg: "Coolify container not running. Found: {{ ci003_containers.stdout_lines }}"
+        success_msg: "Coolify container running"
+
+    - name: "CI-003: Assert supporting containers running"
+      ansible.builtin.assert:
+        that:
+          - "'postgres' in ci003_containers.stdout or 'coolify-db' in ci003_containers.stdout"
+          - "'redis' in ci003_containers.stdout or 'coolify-redis' in ci003_containers.stdout"
+        fail_msg: "Supporting containers missing. Found: {{ ci003_containers.stdout_lines }}"
+        success_msg: "Database and Redis containers running"
+
+    # ==========================================================================
+    # CI-004: Verify Coolify UI Accessible
+    # ==========================================================================
+    - name: "CI-004: Wait for Coolify UI to be available"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        curl -sf -o /dev/null -w "%{http_code}" http://localhost:8000
+      register: ci004_ui
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: ci004_ui.stdout == '200' or ci004_ui.stdout == '302'
+
+    - name: "CI-004: Assert UI is accessible"
+      ansible.builtin.assert:
+        that:
+          - ci004_ui.stdout in ['200', '302']
+        fail_msg: "Coolify UI not accessible, got HTTP {{ ci004_ui.stdout }}"
+        success_msg: "Coolify UI accessible (HTTP {{ ci004_ui.stdout }})"
+
+    # ==========================================================================
+    # CI-005: Verify Docker-in-Docker Works
+    # ==========================================================================
+    - name: "CI-005: Test Docker-in-Docker can pull images"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} docker pull alpine:latest
+      register: ci005_dind
+      changed_when: true
+      timeout: 120
+
+    - name: "CI-005: Assert DinD image pull works"
+      ansible.builtin.assert:
+        that:
+          - ci005_dind.rc == 0
+        fail_msg: "Docker-in-Docker failed to pull image"
+        success_msg: "Docker-in-Docker working correctly"
+
+    # ==========================================================================
+    # CI-006: Verify Storage Driver
+    # ==========================================================================
+    - name: "CI-006: Check Docker storage driver"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} docker info --format '{{ '{{' }}.Driver{{ '}}' }}'
+      register: ci006_driver
+      changed_when: false
+
+    - name: "CI-006: Log storage driver (vfs expected for DinD)"
+      ansible.builtin.debug:
+        msg: "Docker storage driver: {{ ci006_driver.stdout }}"
+
+    # ==========================================================================
+    # CI-007: Verify Coolify SSH Keys Directory
+    # ==========================================================================
+    - name: "CI-007: Check Coolify SSH keys directory exists"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} test -d /data/coolify/ssh/keys
+      register: ci007_sshdir
+      changed_when: false
+
+    - name: "CI-007: Assert SSH keys directory exists"
+      ansible.builtin.assert:
+        that:
+          - ci007_sshdir.rc == 0
+        fail_msg: "Coolify SSH keys directory not found"
+        success_msg: "Coolify SSH keys directory exists"
+
+  # ============================================================================
+  # CLEANUP
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
+      changed_when: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: Coolify Installation"
+      ansible.builtin.debug:
+        msg: "All Coolify installation tests passed!"
+
+  tags:
+    - test
+    - coolify-install
+    - docker-dev

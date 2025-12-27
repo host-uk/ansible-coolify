@@ -193,6 +193,8 @@ native-setup:
 	pip install --upgrade pip
 	pip install ansible-core distlib netaddr jsonschema ipaddr jmespath
 	$(MAKE) native-install-deps
+	@echo "Configuring git hooks..."
+	git config core.hooksPath .githooks
 
 native-start-agent:
 	@if ! pgrep -u $$USER ssh-agent > /dev/null; then \
@@ -280,6 +282,46 @@ docker-dev-status:
 
 docker-dev-restart:
 	$(DOCKER_DEV_COMPOSE) restart
+
+# --- Docker Dev Test Targets ---
+
+docker-dev-test: docker-dev-test-quick
+
+docker-dev-test-quick:
+	@echo "Running quick Docker dev tests (container, SSH, Makefile)..."
+	bash tests/docker-dev/scripts/run_all_tests.sh quick
+
+docker-dev-test-full:
+	@echo "Running full Docker dev test suite..."
+	bash tests/docker-dev/scripts/run_all_tests.sh full
+
+docker-dev-test-api:
+	@echo "Running API tests..."
+	bash tests/docker-dev/scripts/run_all_tests.sh api
+
+docker-dev-test-container:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_01_container_lifecycle.yml
+
+docker-dev-test-ssh:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_02_ssh_connectivity.yml
+
+docker-dev-test-makefile:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_03_makefile_targets.yml
+
+docker-dev-test-install:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_04_coolify_install.yml
+
+docker-dev-test-api-setup:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_05_api_setup.yml
+
+docker-dev-test-node-registration:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_06_node_registration.yml
+
+docker-dev-test-integration:
+	$(MAKE) _run-pb PB=tests/docker-dev/test_07_full_integration.yml
+
+docker-dev-cleanup:
+	bash tests/docker-dev/scripts/cleanup.sh
 
 # --- Production Targets ---
 
@@ -396,6 +438,9 @@ _run-docker:
 	up down shell \
 	docker-dev-up docker-dev-down docker-dev-destroy docker-dev-logs docker-dev-logs-controller docker-dev-logs-builder \
 	docker-dev-shell-controller docker-dev-shell-builder docker-dev-status docker-dev-restart \
+	docker-dev-test docker-dev-test-quick docker-dev-test-full docker-dev-test-api \
+	docker-dev-test-container docker-dev-test-ssh docker-dev-test-makefile docker-dev-test-install \
+	docker-dev-test-api-setup docker-dev-test-node-registration docker-dev-test-integration docker-dev-cleanup \
 	native-build-ansible native-clean native-docker-lint native-docker-test native-install-deps native-lint \
 	native-setup native-start-agent native-test native-test-docker native-test-logic native-test-parallels native-test-syntax native-update-deps \
 	prod-backup prod-clear-host-uk-lon prod-clone-app-de-eu prod-clone-env prod-clone-env-pb prod-clone-host-uk-lon \

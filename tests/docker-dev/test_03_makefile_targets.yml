@@ -1,0 +1,280 @@
+---
+# Test 03: Makefile Targets
+# Tests: All docker-dev-* Makefile targets work correctly
+# Note: This test uses the REAL docker-dev environment (not test isolation)
+#       to validate actual Makefile targets. Run with caution in CI.
+
+- name: "Test 03: Makefile Targets"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    project_root: "{{ playbook_dir | dirname | dirname }}"
+    make_timeout: 300  # 5 minutes for longer operations
+
+  tasks:
+    # ==========================================================================
+    # SETUP
+    # ==========================================================================
+    - name: "SETUP: Verify make is available"
+      ansible.builtin.command: which make
+      register: make_check
+      changed_when: false
+      failed_when: make_check.rc != 0
+
+    - name: "SETUP: Verify Docker is available"
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: "SETUP: Clean any existing docker-dev environment"
+      ansible.builtin.command:
+        cmd: make docker-dev-destroy
+        chdir: "{{ project_root }}"
+      changed_when: true
+      ignore_errors: true
+      timeout: "{{ make_timeout }}"
+
+    # ==========================================================================
+    # MK-001: docker-dev-up
+    # ==========================================================================
+    - name: "MK-001: Test 'make docker-dev-up'"
+      ansible.builtin.command:
+        cmd: make docker-dev-up
+        chdir: "{{ project_root }}"
+      register: mk001_up
+      changed_when: true
+      timeout: "{{ make_timeout }}"
+
+    - name: "MK-001: Assert docker-dev-up succeeded"
+      ansible.builtin.assert:
+        that:
+          - mk001_up.rc == 0
+        fail_msg: "docker-dev-up failed: {{ mk001_up.stderr | default('') }}"
+        success_msg: "docker-dev-up completed successfully"
+
+    - name: "MK-001: Verify containers created"
+      ansible.builtin.command: >
+        docker ps --filter "name=coolify-dev" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: containers_after_up
+      changed_when: false
+
+    - name: "MK-001: Assert containers exist"
+      ansible.builtin.assert:
+        that:
+          - containers_after_up.stdout_lines | length >= 1
+        fail_msg: "No containers created by docker-dev-up"
+        success_msg: "Containers created: {{ containers_after_up.stdout_lines | join(', ') }}"
+
+    # ==========================================================================
+    # MK-002: docker-dev-status
+    # ==========================================================================
+    - name: "MK-002: Test 'make docker-dev-status'"
+      ansible.builtin.command:
+        cmd: make docker-dev-status
+        chdir: "{{ project_root }}"
+      register: mk002_status
+      changed_when: false
+
+    - name: "MK-002: Assert docker-dev-status shows containers"
+      ansible.builtin.assert:
+        that:
+          - mk002_status.rc == 0
+          - "'controller' in mk002_status.stdout or 'coolify' in mk002_status.stdout"
+        fail_msg: "docker-dev-status failed or shows no containers"
+        success_msg: "docker-dev-status shows running containers"
+
+    # ==========================================================================
+    # MK-003: docker-dev-logs (brief check)
+    # ==========================================================================
+    - name: "MK-003: Test 'make docker-dev-logs' (5 second sample)"
+      ansible.builtin.shell:
+        cmd: "timeout 5 make docker-dev-logs || true"
+        chdir: "{{ project_root }}"
+      register: mk003_logs
+      changed_when: false
+      ignore_errors: true
+
+    - name: "MK-003: Assert docker-dev-logs produces output"
+      ansible.builtin.assert:
+        that:
+          # Either it produced logs or timed out (expected for streaming)
+          - mk003_logs.rc == 0 or mk003_logs.rc == 124  # 124 = timeout exit code
+        fail_msg: "docker-dev-logs failed unexpectedly: {{ mk003_logs.stderr | default('') }}"
+        success_msg: "docker-dev-logs produces output"
+
+    # ==========================================================================
+    # MK-004: docker-dev-logs-controller
+    # ==========================================================================
+    - name: "MK-004: Test 'make docker-dev-logs-controller' (5 second sample)"
+      ansible.builtin.shell:
+        cmd: "timeout 5 make docker-dev-logs-controller || true"
+        chdir: "{{ project_root }}"
+      register: mk004_logs_ctrl
+      changed_when: false
+      ignore_errors: true
+
+    - name: "MK-004: Assert controller logs accessible"
+      ansible.builtin.assert:
+        that:
+          - mk004_logs_ctrl.rc == 0 or mk004_logs_ctrl.rc == 124
+        fail_msg: "docker-dev-logs-controller failed"
+        success_msg: "Controller logs accessible"
+
+    # ==========================================================================
+    # MK-005: docker-dev-shell-controller
+    # ==========================================================================
+    - name: "MK-005: Test shell access to controller (echo test)"
+      ansible.builtin.shell:
+        cmd: |
+          # Simulate what docker-dev-shell-controller does
+          docker exec coolify-dev-controller echo "SHELL_ACCESS_OK"
+        chdir: "{{ project_root }}"
+      register: mk005_shell
+      changed_when: false
+
+    - name: "MK-005: Assert shell access works"
+      ansible.builtin.assert:
+        that:
+          - mk005_shell.rc == 0
+          - "'SHELL_ACCESS_OK' in mk005_shell.stdout"
+        fail_msg: "Shell access to controller failed"
+        success_msg: "Shell access to controller works"
+
+    # ==========================================================================
+    # MK-006: docker-dev-restart
+    # ==========================================================================
+    - name: "MK-006: Get container start times before restart"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.StartedAt{{ '}}' }}' coolify-dev-controller
+      register: start_time_before
+      changed_when: false
+
+    - name: "MK-006: Test 'make docker-dev-restart'"
+      ansible.builtin.command:
+        cmd: make docker-dev-restart
+        chdir: "{{ project_root }}"
+      register: mk006_restart
+      changed_when: true
+      timeout: "{{ make_timeout }}"
+
+    - name: "MK-006: Wait for container to be healthy after restart"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' coolify-dev-controller
+      register: health_after_restart
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: health_after_restart.stdout == 'healthy'
+
+    - name: "MK-006: Get container start times after restart"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.StartedAt{{ '}}' }}' coolify-dev-controller
+      register: start_time_after
+      changed_when: false
+
+    - name: "MK-006: Assert container was restarted"
+      ansible.builtin.assert:
+        that:
+          - mk006_restart.rc == 0
+          - start_time_before.stdout != start_time_after.stdout
+        fail_msg: "docker-dev-restart did not restart containers"
+        success_msg: "Containers successfully restarted"
+
+    # ==========================================================================
+    # MK-007: docker-dev-down
+    # ==========================================================================
+    - name: "MK-007: Test 'make docker-dev-down'"
+      ansible.builtin.command:
+        cmd: make docker-dev-down
+        chdir: "{{ project_root }}"
+      register: mk007_down
+      changed_when: true
+      timeout: "{{ make_timeout }}"
+
+    - name: "MK-007: Assert docker-dev-down succeeded"
+      ansible.builtin.assert:
+        that:
+          - mk007_down.rc == 0
+        fail_msg: "docker-dev-down failed"
+        success_msg: "docker-dev-down completed"
+
+    - name: "MK-007: Verify containers removed (docker compose down removes containers)"
+      ansible.builtin.command: >
+        docker ps -a --filter "name=coolify-dev" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: containers_after_down
+      changed_when: false
+
+    - name: "MK-007: Assert containers are removed by down"
+      ansible.builtin.assert:
+        that:
+          - containers_after_down.stdout == ""
+        fail_msg: "Containers still exist after down: {{ containers_after_down.stdout }}"
+        success_msg: "docker-dev-down removed all containers (expected behavior)"
+
+    # ==========================================================================
+    # MK-008: docker-dev-up (recreate containers after down)
+    # ==========================================================================
+    - name: "MK-008: Recreate containers with docker-dev-up"
+      ansible.builtin.command:
+        cmd: make docker-dev-up
+        chdir: "{{ project_root }}"
+      register: mk008_restart
+      changed_when: true
+      timeout: "{{ make_timeout }}"
+
+    - name: "MK-008: Verify containers running again"
+      ansible.builtin.command: >
+        docker ps --filter "name=coolify-dev" --filter "status=running" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: running_again
+      changed_when: false
+
+    - name: "MK-008: Assert containers recreated"
+      ansible.builtin.assert:
+        that:
+          - running_again.stdout_lines | length >= 1
+        fail_msg: "Containers were not recreated"
+        success_msg: "Containers recreated and running"
+
+  # ============================================================================
+  # CLEANUP
+  # ============================================================================
+  post_tasks:
+    # MK-009: docker-dev-destroy (final cleanup and test)
+    - name: "MK-009: Test 'make docker-dev-destroy'"
+      ansible.builtin.command:
+        cmd: make docker-dev-destroy
+        chdir: "{{ project_root }}"
+      register: mk009_destroy
+      changed_when: true
+      timeout: "{{ make_timeout }}"
+
+    - name: "MK-009: Assert docker-dev-destroy succeeded"
+      ansible.builtin.assert:
+        that:
+          - mk009_destroy.rc == 0
+        fail_msg: "docker-dev-destroy failed"
+        success_msg: "docker-dev-destroy completed"
+
+    - name: "MK-009: Verify no containers remain"
+      ansible.builtin.command: >
+        docker ps -a --filter "name=coolify-dev" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: final_containers
+      changed_when: false
+
+    - name: "MK-009: Assert all containers removed"
+      ansible.builtin.assert:
+        that:
+          - final_containers.stdout == ""
+        fail_msg: "Containers still exist: {{ final_containers.stdout }}"
+        success_msg: "All containers removed"
+
+    - name: "TEST PASSED: Makefile Targets"
+      ansible.builtin.debug:
+        msg: "All Makefile target tests passed!"
+
+  tags:
+    - test
+    - makefile-targets
+    - docker-dev

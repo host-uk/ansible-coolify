@@ -41,17 +41,13 @@ RUN curl -fsSL https://get.docker.com | sh
 
 # Configure Docker for nested container operation (DIND)
 # Use vfs storage driver since overlayfs doesn't work nested
-# Create a base config that will be merged with any runtime changes
-RUN mkdir -p /etc/docker && \
-    echo '{"storage-driver": "vfs"}' > /etc/docker/daemon.json
-
-# Create a systemd service to ensure vfs storage-driver persists
-# This runs before Docker starts and ensures storage-driver is always set
-RUN mkdir -p /etc/systemd/system/docker.service.d && \
-    printf '[Service]\nExecStartPre=/bin/bash -c '\''if [ -f /etc/docker/daemon.json ]; then jq -s ".[0] * {\"storage-driver\": \"vfs\"}" /etc/docker/daemon.json > /tmp/daemon.json.tmp && mv /tmp/daemon.json.tmp /etc/docker/daemon.json; else echo "{\"storage-driver\": \"vfs\"}" > /etc/docker/daemon.json; fi || echo "{\"storage-driver\": \"vfs\"}" > /etc/docker/daemon.json'\''\n' > /etc/systemd/system/docker.service.d/vfs-storage.conf
-
-# Install jq for JSON manipulation in the service
-RUN apt-get update && apt-get install -y jq && rm -rf /var/lib/apt/lists/*
+# We use a systemd override to pass --storage-driver=vfs directly to dockerd
+# This is robust: even if Coolify's install script modifies daemon.json, vfs is enforced via CLI flag
+# Note: daemon.json must NOT contain storage-driver when using the flag (Docker forbids duplicates)
+RUN mkdir -p /etc/docker /etc/systemd/system/docker.service.d && \
+    echo '{}' > /etc/docker/daemon.json && \
+    printf '[Service]\nExecStart=\nExecStart=/usr/bin/dockerd --storage-driver=vfs -H fd:// --containerd=/run/containerd/containerd.sock\n' \
+    > /etc/systemd/system/docker.service.d/vfs-storage.conf
 
 # Clean up systemd units that don't work in containers (but preserve SSH and Docker)
 RUN cd /lib/systemd/system/sysinit.target.wants/ && \

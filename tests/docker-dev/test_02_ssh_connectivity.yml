@@ -1,0 +1,276 @@
+---
+# Test 02: SSH Connectivity
+# Tests: SSH key generation, key permissions, SSH connectivity to all containers
+
+- name: "Test 02: SSH Connectivity"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    # ==========================================================================
+    # SETUP
+    # ==========================================================================
+    - name: "SETUP: Verify Docker is available"
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: "SETUP: Ensure clean state before tests"
+      ansible.builtin.shell: |
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
+        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
+      changed_when: true
+      ignore_errors: true
+
+    - name: "SETUP: Create containers with docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+    - name: "SETUP: Wait for all containers to be healthy"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+      register: setup_health
+      loop: "{{ docker_dev_containers }}"
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: setup_health.stdout == 'healthy'
+
+    # ==========================================================================
+    # SSH-001: SSH Key Generation
+    # ==========================================================================
+    - name: "SSH-001: Check SSH private key exists for each container"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_ssh_keys_path | expanduser }}/{{ item.hostname }}"
+      register: private_keys
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: "SSH-001: Assert all private keys exist"
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Private key missing for {{ item.item.hostname }}"
+        success_msg: "Private key exists for {{ item.item.hostname }}"
+      loop: "{{ private_keys.results }}"
+      loop_control:
+        label: "{{ item.item.hostname }}"
+
+    - name: "SSH-001: Check SSH public key exists for each container"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_ssh_keys_path | expanduser }}/{{ item.hostname }}.pub"
+      register: public_keys
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: "SSH-001: Assert all public keys exist"
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: "Public key missing for {{ item.item.hostname }}"
+        success_msg: "Public key exists for {{ item.item.hostname }}"
+      loop: "{{ public_keys.results }}"
+      loop_control:
+        label: "{{ item.item.hostname }}"
+
+    # ==========================================================================
+    # SSH-002: Key Permission Validation
+    # ==========================================================================
+    - name: "SSH-002: Check private key permissions"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_ssh_keys_path | expanduser }}/{{ item.hostname }}"
+      register: key_perms
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: "SSH-002: Assert private key permissions are restrictive (0600)"
+      ansible.builtin.assert:
+        that:
+          - item.stat.mode == '0600'
+        fail_msg: "Private key {{ item.item.hostname }} has insecure permissions: {{ item.stat.mode }}"
+        success_msg: "Private key {{ item.item.hostname }} has correct permissions (0600)"
+      loop: "{{ key_perms.results }}"
+      loop_control:
+        label: "{{ item.item.hostname }}"
+
+    # ==========================================================================
+    # SSH-003: SSH Port Reachability
+    # ==========================================================================
+    - name: "SSH-003: Wait for SSH port on all containers"
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 22
+        timeout: 30
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }} ({{ item.ip }})"
+
+    # ==========================================================================
+    # SSH-004: SSH Connection Test
+    # ==========================================================================
+    - name: "SSH-004: Test SSH connection to each container"
+      ansible.builtin.command: >
+        ssh -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -o ConnectTimeout=10
+            -o BatchMode=yes
+            -i {{ docker_dev_ssh_keys_path | expanduser }}/{{ item.hostname }}
+            root@{{ item.ip }} "echo 'SSH_OK'"
+      register: ssh_tests
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+      changed_when: false
+
+    - name: "SSH-004: Assert SSH connection succeeded"
+      ansible.builtin.assert:
+        that:
+          - "'SSH_OK' in item.stdout"
+        fail_msg: "SSH failed for {{ item.item.hostname }}: {{ item.stderr | default('unknown error') }}"
+        success_msg: "SSH connection to {{ item.item.hostname }} successful"
+      loop: "{{ ssh_tests.results }}"
+      loop_control:
+        label: "{{ item.item.hostname }}"
+
+    # ==========================================================================
+    # SSH-005: Public Key Injection Verification
+    # ==========================================================================
+    - name: "SSH-005: Get public key content"
+      ansible.builtin.slurp:
+        path: "{{ docker_dev_ssh_keys_path | expanduser }}/{{ item.hostname }}.pub"
+      register: pubkey_content
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+
+    - name: "SSH-005: Verify public key in container's authorized_keys"
+      ansible.builtin.command: >
+        ssh -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -i {{ docker_dev_ssh_keys_path | expanduser }}/{{ item.item.hostname }}
+            root@{{ item.item.ip }} "cat /root/.ssh/authorized_keys"
+      register: container_authkeys
+      loop: "{{ pubkey_content.results }}"
+      loop_control:
+        label: "{{ item.item.hostname }}"
+      changed_when: false
+
+    - name: "SSH-005: Assert public key present in authorized_keys"
+      ansible.builtin.assert:
+        that:
+          - (item.0.content | b64decode | trim) in item.1.stdout
+        fail_msg: "Public key not found in authorized_keys for {{ item.0.item.hostname }}"
+        success_msg: "Public key verified in {{ item.0.item.hostname }} authorized_keys"
+      loop: "{{ pubkey_content.results | zip(container_authkeys.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item.hostname }}"
+
+    # ==========================================================================
+    # SSH-006: SSH Command Execution
+    # ==========================================================================
+    - name: "SSH-006: Execute command via SSH (whoami)"
+      ansible.builtin.command: >
+        ssh -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -i {{ docker_dev_ssh_keys_path | expanduser }}/{{ item.hostname }}
+            root@{{ item.ip }} "whoami"
+      register: whoami_results
+      loop: "{{ docker_dev_containers }}"
+      loop_control:
+        label: "{{ item.hostname }}"
+      changed_when: false
+
+    - name: "SSH-006: Assert command executed as root"
+      ansible.builtin.assert:
+        that:
+          - item.stdout == 'root'
+        fail_msg: "SSH command failed or not root on {{ item.item.hostname }}: {{ item.stdout }}"
+        success_msg: "SSH command execution verified on {{ item.item.hostname }}"
+      loop: "{{ whoami_results.results }}"
+      loop_control:
+        label: "{{ item.item.hostname }}"
+
+    # ==========================================================================
+    # SSH-007: SSH from Container to Container
+    # ==========================================================================
+    - name: "SSH-007: Copy controller's private key to controller container"
+      ansible.builtin.command: >
+        docker cp {{ docker_dev_ssh_keys_path | expanduser }}/{{ docker_dev_containers[1].hostname }}
+                  {{ docker_dev_name_prefix }}-controller:/tmp/worker-key
+      changed_when: true
+
+    - name: "SSH-007: Set key permissions in container"
+      ansible.builtin.command: >
+        docker exec {{ docker_dev_name_prefix }}-controller chmod 600 /tmp/worker-key
+      changed_when: true
+
+    - name: "SSH-007: Test SSH from controller to worker (container-to-container)"
+      ansible.builtin.command: >
+        docker exec {{ docker_dev_name_prefix }}-controller
+        ssh -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            -i /tmp/worker-key
+            root@{{ docker_dev_containers[1].ip }} "echo 'C2C_SSH_OK'"
+      register: c2c_ssh
+      changed_when: false
+
+    - name: "SSH-007: Assert container-to-container SSH works"
+      ansible.builtin.assert:
+        that:
+          - "'C2C_SSH_OK' in c2c_ssh.stdout"
+        fail_msg: "Container-to-container SSH failed"
+        success_msg: "Container-to-container SSH successful"
+
+  # ============================================================================
+  # CLEANUP
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
+      changed_when: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test SSH keys"
+      ansible.builtin.file:
+        path: "{{ docker_dev_ssh_keys_path | expanduser }}/{{ item.0.hostname }}{{ item.1 }}"
+        state: absent
+      loop: "{{ docker_dev_containers | product(['', '.pub']) | list }}"
+      loop_control:
+        label: "{{ item.0.hostname }}{{ item.1 }}"
+      when: "'test-' in item.0.hostname"
+      ignore_errors: true
+
+    - name: "TEST PASSED: SSH Connectivity"
+      ansible.builtin.debug:
+        msg: "All SSH connectivity tests passed!"
+
+  tags:
+    - test
+    - ssh-connectivity
+    - docker-dev

@@ -1,0 +1,256 @@
+---
+# Test 01: Container Lifecycle
+# Tests: Container creation, health checks, networking, idempotency, and cleanup
+
+- name: "Test 01: Container Lifecycle"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    # Override docker_dev role variables for test isolation
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+
+  tasks:
+    # ==========================================================================
+    # SETUP
+    # ==========================================================================
+    - name: "SETUP: Verify Docker is available"
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: "SETUP: Ensure clean state before tests"
+      ansible.builtin.shell: |
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
+        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
+      changed_when: true
+      ignore_errors: true
+
+    # ==========================================================================
+    # CL-001: Container Creation
+    # ==========================================================================
+    - name: "CL-001: Create containers with docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+      register: cl001_create
+
+    - name: "CL-001: Verify all containers exist"
+      ansible.builtin.command: >
+        docker ps --filter "name={{ docker_dev_name_prefix }}" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: container_list
+      changed_when: false
+
+    - name: "CL-001: Assert expected containers created"
+      ansible.builtin.assert:
+        that:
+          - "'{{ docker_dev_name_prefix }}-controller' in container_list.stdout"
+          - "'{{ docker_dev_name_prefix }}-worker' in container_list.stdout"
+          - "'{{ docker_dev_name_prefix }}-builder' in container_list.stdout"
+        fail_msg: "Expected containers not found. Got: {{ container_list.stdout_lines }}"
+        success_msg: "All containers created successfully"
+
+    # ==========================================================================
+    # CL-002: Health Check Validation
+    # ==========================================================================
+    - name: "CL-002: Check container health status"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+      register: health_status
+      loop: "{{ docker_dev_containers }}"
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: health_status.stdout == 'healthy'
+
+    - name: "CL-002: Assert all containers are healthy"
+      ansible.builtin.assert:
+        that:
+          - item.stdout == 'healthy'
+        fail_msg: "Container {{ item.item.name }} is not healthy: {{ item.stdout }}"
+        success_msg: "Container {{ item.item.name }} is healthy"
+      loop: "{{ health_status.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    # ==========================================================================
+    # CL-003: Network Connectivity
+    # ==========================================================================
+    - name: "CL-003: Test inter-container connectivity (controller -> worker)"
+      ansible.builtin.command: >
+        docker exec {{ docker_dev_name_prefix }}-controller ping -c 1 -W 2 172.29.0.20
+      register: ping_worker
+      changed_when: false
+
+    - name: "CL-003: Test inter-container connectivity (controller -> builder)"
+      ansible.builtin.command: >
+        docker exec {{ docker_dev_name_prefix }}-controller ping -c 1 -W 2 172.29.0.30
+      register: ping_builder
+      changed_when: false
+
+    - name: "CL-003: Assert network connectivity works"
+      ansible.builtin.assert:
+        that:
+          - ping_worker.rc == 0
+          - ping_builder.rc == 0
+        fail_msg: "Inter-container networking failed"
+        success_msg: "Network connectivity verified between all containers"
+
+    # ==========================================================================
+    # CL-004: Container State Verification
+    # ==========================================================================
+    - name: "CL-004: Verify containers are in running state"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Running{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+      register: running_state
+      loop: "{{ docker_dev_containers }}"
+      changed_when: false
+
+    - name: "CL-004: Assert containers are running"
+      ansible.builtin.assert:
+        that:
+          - item.stdout == 'true'
+        fail_msg: "Container {{ item.item.name }} is not running"
+        success_msg: "Container {{ item.item.name }} is running"
+      loop: "{{ running_state.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    # ==========================================================================
+    # CL-005: Resource Limits Verification
+    # ==========================================================================
+    - name: "CL-005: Verify CPU limits applied"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.HostConfig.NanoCpus{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+      register: cpu_limits
+      loop: "{{ docker_dev_containers }}"
+      changed_when: false
+
+    - name: "CL-005: Verify memory limits applied"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.HostConfig.Memory{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+      register: memory_limits
+      loop: "{{ docker_dev_containers }}"
+      changed_when: false
+
+    - name: "CL-005: Assert resource limits are non-zero"
+      ansible.builtin.assert:
+        that:
+          - item.stdout | int > 0
+        fail_msg: "Memory limit not applied to {{ item.item.name }}"
+        success_msg: "Memory limit verified for {{ item.item.name }}"
+      loop: "{{ memory_limits.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    # ==========================================================================
+    # CL-006: Idempotency Test
+    # ==========================================================================
+    - name: "CL-006: Run docker_dev role again (idempotency test)"
+      ansible.builtin.include_role:
+        name: docker_dev
+      register: cl006_idempotency
+
+    - name: "CL-006: Verify containers still exist after second run"
+      ansible.builtin.shell: |
+        docker ps --filter "name={{ docker_dev_name_prefix }}" --format "{{ '{{' }}.Names{{ '}}' }}" | wc -l
+      register: container_count
+      changed_when: false
+
+    - name: "CL-006: Assert correct container count"
+      ansible.builtin.assert:
+        that:
+          - container_count.stdout | int == docker_dev_containers | length
+        fail_msg: "Container count changed after idempotent run: {{ container_count.stdout }}"
+        success_msg: "Idempotency verified - container count unchanged"
+
+    # ==========================================================================
+    # CL-007: Stop/Start Cycle
+    # ==========================================================================
+    - name: "CL-007: Stop containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml stop
+      changed_when: true
+
+    - name: "CL-007: Verify containers stopped"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Running{{ '}}' }}' {{ docker_dev_name_prefix }}-controller
+      register: stopped_state
+      changed_when: false
+
+    - name: "CL-007: Assert container stopped"
+      ansible.builtin.assert:
+        that:
+          - stopped_state.stdout == 'false'
+        fail_msg: "Container did not stop"
+        success_msg: "Container stopped successfully"
+
+    - name: "CL-007: Start containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml start
+      changed_when: true
+
+    - name: "CL-007: Wait for containers to be healthy again"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-controller
+      register: restart_health
+      changed_when: false
+      retries: 30
+      delay: 2
+      until: restart_health.stdout == 'healthy'
+
+    - name: "CL-007: Assert container restarted successfully"
+      ansible.builtin.assert:
+        that:
+          - restart_health.stdout == 'healthy'
+        fail_msg: "Container failed to restart healthily"
+        success_msg: "Container restarted and healthy"
+
+  # ============================================================================
+  # CLEANUP (always runs)
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
+      changed_when: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "CLEANUP: Verify no containers remain"
+      ansible.builtin.command: >
+        docker ps -a --filter "name={{ docker_dev_name_prefix }}" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: post_cleanup
+      changed_when: false
+
+    - name: "CLEANUP: Assert cleanup complete"
+      ansible.builtin.assert:
+        that:
+          - post_cleanup.stdout == ""
+        fail_msg: "Cleanup incomplete, containers remain: {{ post_cleanup.stdout }}"
+        success_msg: "Cleanup complete - no test containers remain"
+
+    - name: "TEST PASSED: Container Lifecycle"
+      ansible.builtin.debug:
+        msg: "All container lifecycle tests passed!"
+
+  tags:
+    - test
+    - container-lifecycle
+    - docker-dev

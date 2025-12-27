@@ -1,0 +1,319 @@
+---
+# Test 05: API Setup
+# Tests: API token generation, validation, and persistence
+
+- name: "Test 05: API Setup"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
+
+  tasks:
+    # ==========================================================================
+    # SETUP: Create containers and install Coolify
+    # ==========================================================================
+    - name: "SETUP: Verify Docker is available"
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: "SETUP: Clean existing environment"
+      ansible.builtin.shell: |
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
+        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
+      changed_when: true
+      ignore_errors: true
+
+    - name: "SETUP: Create containers"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+    - name: "SETUP: Wait for controller to be healthy"
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ controller_container }}
+      register: health
+      changed_when: false
+      retries: 60
+      delay: 2
+      until: health.stdout == 'healthy'
+
+    - name: "SETUP: Download Coolify install script"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /root/install.sh
+      register: install_download
+      changed_when: true
+      retries: 3
+      delay: 5
+      until: install_download.rc == 0
+
+    - name: "SETUP: Make install script executable"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} chmod +x /root/install.sh
+      changed_when: true
+
+    - name: "SETUP: Install Coolify"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        /bin/bash -c "TERM=dumb /root/install.sh"
+      register: install
+      changed_when: true
+      timeout: 900
+
+    - name: "SETUP: Wait for Coolify to be ready"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        curl -sf -o /dev/null http://localhost:8000
+      register: coolify_ready
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: coolify_ready.rc == 0
+
+    # ==========================================================================
+    # API-001: Enable API via PHP Tinker
+    # ==========================================================================
+    - name: "API-001: Enable Coolify API"
+      ansible.builtin.shell: |
+        docker exec {{ controller_container }} docker exec coolify php artisan tinker --execute='
+        $settings = \App\Models\InstanceSettings::first();
+        $settings->is_api_enabled = true;
+        $settings->allowed_ips = "0.0.0.0";
+        $settings->save();
+        echo "API_ENABLED";
+        '
+      register: api001_enable
+      changed_when: "'API_ENABLED' in api001_enable.stdout"
+      retries: 10
+      delay: 5
+      until: "'API_ENABLED' in api001_enable.stdout"
+
+    - name: "API-001: Assert API enabled"
+      ansible.builtin.assert:
+        that:
+          - "'API_ENABLED' in api001_enable.stdout"
+        fail_msg: "Failed to enable API"
+        success_msg: "API enabled successfully"
+
+    # ==========================================================================
+    # API-002: Generate API Token
+    # ==========================================================================
+    - name: "API-002: Create user and API token via tinker"
+      ansible.builtin.shell: |
+        docker exec {{ controller_container }} docker exec coolify php artisan tinker --execute='
+        $user = \App\Models\User::first();
+        if (!$user) {
+            $user = \App\Models\User::create([
+                "name" => "admin",
+                "email" => "admin@test.local",
+                "password" => \Illuminate\Support\Facades\Hash::make("password123"),
+                "email_verified_at" => now(),
+            ]);
+        }
+        $team = $user->teams()->first();
+        if (!$team) {
+            $team = \App\Models\Team::create([
+                "name" => $user->name . " Team",
+                "personal_team" => true,
+            ]);
+            $user->teams()->attach($team->id, ["role" => "admin"]);
+        }
+        $plainToken = \Illuminate\Support\Str::random(40);
+        $newToken = new \Laravel\Sanctum\PersonalAccessToken();
+        $newToken->name = "ansible-test-token";
+        $newToken->token = hash("sha256", $plainToken);
+        $newToken->abilities = ["*"];
+        $newToken->tokenable_id = $user->id;
+        $newToken->tokenable_type = get_class($user);
+        $newToken->team_id = $team->id;
+        $newToken->save();
+        echo $plainToken;
+        '
+      register: api002_token
+      changed_when: true
+
+    - name: "API-002: Extract token from output"
+      ansible.builtin.set_fact:
+        coolify_api_token: "{{ api002_token.stdout_lines | last | trim }}"
+      when: api002_token.stdout_lines | length > 0
+
+    - name: "API-002: Assert token generated"
+      ansible.builtin.assert:
+        that:
+          - coolify_api_token is defined
+          - coolify_api_token | length > 20
+        fail_msg: "Token not generated or too short"
+        success_msg: "API token generated ({{ coolify_api_token | length }} chars)"
+
+    # ==========================================================================
+    # API-003: Validate Token via API
+    # ==========================================================================
+    - name: "API-003: Test API with token (version endpoint)"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Accept: "application/json"
+        return_content: true
+        status_code: 200
+      register: api003_version
+      retries: 10
+      delay: 3
+      until: api003_version.status == 200
+
+    - name: "API-003: Assert API responds correctly"
+      ansible.builtin.assert:
+        that:
+          - api003_version.status == 200
+          - api003_version.content is defined
+          - api003_version.content | length > 0
+        fail_msg: "API validation failed: {{ api003_version }}"
+        success_msg: "API responding correctly, version: {{ api003_version.content }}"
+
+    # ==========================================================================
+    # API-004: Test List Servers Endpoint
+    # ==========================================================================
+    - name: "API-004: Test list servers endpoint"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Accept: "application/json"
+        return_content: true
+        status_code: 200
+      register: api004_servers
+
+    - name: "API-004: Assert servers endpoint works"
+      ansible.builtin.assert:
+        that:
+          - api004_servers.status == 200
+          - api004_servers.json is defined
+        fail_msg: "Servers endpoint failed"
+        success_msg: "Servers endpoint working, found {{ api004_servers.json | length }} servers"
+
+    # ==========================================================================
+    # API-005: Test List Projects Endpoint
+    # ==========================================================================
+    - name: "API-005: Test list projects endpoint"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Accept: "application/json"
+        return_content: true
+        status_code: 200
+      register: api005_projects
+
+    - name: "API-005: Assert projects endpoint works"
+      ansible.builtin.assert:
+        that:
+          - api005_projects.status == 200
+        fail_msg: "Projects endpoint failed"
+        success_msg: "Projects endpoint working"
+
+    # ==========================================================================
+    # API-006: Test Invalid Token Rejected
+    # ==========================================================================
+    - name: "API-006: Test invalid token is rejected"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer invalid-token-12345"
+          Accept: "application/json"
+        status_code: [401, 403]
+      register: api006_invalid
+
+    - name: "API-006: Assert invalid token rejected"
+      ansible.builtin.assert:
+        that:
+          - api006_invalid.status in [401, 403]
+        fail_msg: "Invalid token was not rejected"
+        success_msg: "Invalid token correctly rejected (HTTP {{ api006_invalid.status }})"
+
+    # ==========================================================================
+    # API-007: Test Token Persistence
+    # ==========================================================================
+    - name: "API-007: Save token to container"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }}
+        /bin/bash -c "echo '{{ coolify_api_token }}' > /data/coolify/test-ansible-token"
+      changed_when: true
+
+    - name: "API-007: Read token back from container"
+      ansible.builtin.command: >
+        docker exec {{ controller_container }} cat /data/coolify/test-ansible-token
+      register: api007_read
+      changed_when: false
+
+    - name: "API-007: Assert token persisted correctly"
+      ansible.builtin.assert:
+        that:
+          - api007_read.stdout | trim == coolify_api_token
+        fail_msg: "Token not persisted correctly"
+        success_msg: "Token persistence verified"
+
+    # ==========================================================================
+    # API-008: Test Token Reuse
+    # ==========================================================================
+    - name: "API-008: Use persisted token for API call"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ api007_read.stdout | trim }}"
+          Accept: "application/json"
+        status_code: 200
+      register: api008_reuse
+
+    - name: "API-008: Assert persisted token works"
+      ansible.builtin.assert:
+        that:
+          - api008_reuse.status == 200
+        fail_msg: "Persisted token failed"
+        success_msg: "Persisted token works correctly"
+
+  # ============================================================================
+  # CLEANUP
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
+      changed_when: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: API Setup"
+      ansible.builtin.debug:
+        msg: "All API setup tests passed!"
+
+  tags:
+    - test
+    - api-setup
+    - docker-dev

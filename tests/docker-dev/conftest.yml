@@ -1,0 +1,98 @@
+---
+# Shared test configuration for Docker development environment tests
+# Include this file in test playbooks: vars_files: ["conftest.yml"]
+
+# Test environment uses a separate network to avoid conflicts with production docker-dev
+test_docker_dev_name_prefix: "coolify-test"
+test_docker_dev_network_name: "coolify-test-net"
+test_docker_dev_network_subnet: "172.29.0.0/16"
+test_docker_dev_network_gateway: "172.29.0.1"
+test_docker_dev_compose_path: "./docker-test"
+test_docker_dev_logs_path: "./docker-test-logs"
+test_docker_dev_ssh_keys_path: "~/.ssh"
+
+# Test container definitions (subset for faster testing)
+test_docker_dev_containers:
+  - name: controller
+    hostname: test-controller.lan
+    ip: "172.29.0.10"
+    labels: [controller]
+    resources:
+      cpu: "1"
+      memory: "2g"
+    ports:
+      - "2310:22"    # SSH
+      - "9000:8000"  # Coolify UI
+
+  - name: worker
+    hostname: test-worker.lan
+    ip: "172.29.0.20"
+    labels: [server]
+    resources:
+      cpu: "1"
+      memory: "1g"
+    ports:
+      - "2320:22"
+
+  - name: builder
+    hostname: test-builder.lan
+    ip: "172.29.0.30"
+    labels: [builder, server]
+    resources:
+      cpu: "2"
+      memory: "2g"
+    ports:
+      - "2330:22"
+
+# Full container set for integration tests
+test_docker_dev_containers_full:
+  - name: controller
+    hostname: test-controller.lan
+    ip: "172.29.0.10"
+    labels: [controller]
+    resources:
+      cpu: "2"
+      memory: "4g"
+    ports:
+      - "2310:22"
+      - "9000:8000"
+      - "9001:6001"
+      - "9002:6002"
+
+  - name: app-server-1
+    hostname: test-app-server-1.lan
+    ip: "172.29.0.20"
+    labels: [server]
+    resources:
+      cpu: "2"
+      memory: "2g"
+    ports:
+      - "2320:22"
+
+  - name: app-server-2
+    hostname: test-app-server-2.lan
+    ip: "172.29.0.21"
+    labels: [server]
+    resources:
+      cpu: "2"
+      memory: "2g"
+    ports:
+      - "2321:22"
+
+  - name: builder
+    hostname: test-builder.lan
+    ip: "172.29.0.30"
+    labels: [builder, server]
+    resources:
+      cpu: "4"
+      memory: "4g"
+    ports:
+      - "2330:22"
+
+# API configuration for tests
+test_coolify_api_base_url: "http://172.29.0.10:8000/api/v1"
+test_coolify_api_timeout: 30
+
+# Cleanup settings
+test_cleanup_on_success: true
+test_cleanup_on_failure: false

@@ -33,7 +33,12 @@ services:
     networks:
       {{ docker_dev_network_name }}:
         ipv4_address: {{ container.ip }}
-{% if 'controller' in container.labels %}
+{% if container.ports is defined %}
+    ports:
+{% for port in container.ports %}
+      - "{{ port }}"
+{% endfor %}
+{% elif 'controller' in container.labels %}
     ports:
       - "8000:8000"   # Coolify UI
       - "6001:6001"   # Coolify WebSocket

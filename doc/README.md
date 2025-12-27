@@ -20,7 +20,7 @@ This project provides a comprehensive Ansible-based automation suite for install
         - `coolify/service/`: Service-specific tasks.
     - `roles/`: Reusable logic for system hardening and Coolify management.
     - `state/`: (Ignored by git) Local store for host-specific state and backups.
-- `docs/`: Project documentation.
+- `doc/`: Project documentation.
 - `Makefile`: Entry point for common operations.
 - `inventory.example`: Template for the server inventory.
 
@@ -61,3 +61,18 @@ The project defines clear personas to guide interaction with the platform:
 - **Resource Cloning**: Support for cloning environments and applications across different servers or regions.
 - **Worker Registration**: Automatically registers worker nodes into the Coolify controller.
 - **S3 Integration**: Support for both private (infrastructure backup) and public (application storage) buckets on Hetzner Object Storage.
+
+#### Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Quick Start](quick_start.md) | Getting started guide |
+| [Makefile Targets](make.md) | All available make commands |
+| [Playbooks](playbooks.md) | Playbook reference |
+| [Ansible Roles](ansible_roles.md) | Role documentation |
+| [State Management](state_management.md) | Backup and state handling |
+| [Docker Dev Environment](docker_dev.md) | Local development with Docker |
+| [Testing](testing.md) | Test suite documentation |
+| [API Modules](api_modules.md) | Coolify API Ansible modules |
+| [Hetzner Integration](hetzner_integration.md) | Cloud infrastructure setup |
+| [API Reference](apis/) | Coolify OpenAPI specification |

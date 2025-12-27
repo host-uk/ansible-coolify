@@ -1,0 +1,27 @@
+#!/bin/bash
+# Pre-commit hook to prevent state/ directory from being committed
+# This is a safety measure - state/ contains sensitive data like API tokens,
+# SSH keys, and database backups that should NEVER be in version control.
+
+# Check for any staged files in state/ directory
+STAGED_STATE_FILES=$(git diff --cached --name-only | grep -E '^state/' || true)
+
+if [ -n "$STAGED_STATE_FILES" ]; then
+    echo "ERROR: Attempting to commit files from state/ directory!"
+    echo ""
+    echo "The state/ directory contains sensitive data and must NEVER be committed:"
+    echo "  - API tokens"
+    echo "  - SSH private keys"
+    echo "  - Database dumps"
+    echo "  - Encryption keys"
+    echo ""
+    echo "Files blocked from commit:"
+    echo "$STAGED_STATE_FILES" | sed 's/^/  - /'
+    echo ""
+    echo "To unstage these files:"
+    echo "  git reset HEAD state/"
+    echo ""
+    exit 1
+fi
+
+exit 0
