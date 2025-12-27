@@ -3,6 +3,9 @@
 # These hosts are managed by the docker_dev role
 all:
   children:
+    controller:
+      hosts:
+        controller.lan:
     development:
       hosts:
         controller.lan:

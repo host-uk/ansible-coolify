@@ -18,10 +18,11 @@
 
 - name: Restore database
   ansible.builtin.shell: |
-    set -o pipefail
     cat /tmp/coolify_db.dump | docker exec -i coolify-db pg_restore --verbose --clean --no-acl --no-owner -U coolify -d coolify
+  args:
+    executable: /bin/bash
   register: restore_result
-  failed_when: 
+  failed_when:
     - restore_result.rc != 0
     - "'errors ignored on restore' not in restore_result.stderr"
   changed_when: true

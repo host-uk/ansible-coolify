@@ -27,7 +27,6 @@
 
 - name: Get latest backup info via Tinker
   ansible.builtin.shell: |
-    set -o pipefail
     docker exec coolify php artisan tinker --execute='
     $execution = \Illuminate\Support\Facades\DB::table("scheduled_database_backup_executions")
         ->latest()
@@ -76,8 +75,9 @@
 
 - name: Get APP_KEY from .env
   ansible.builtin.shell: |
-    set -o pipefail
     grep '^APP_KEY=' /data/coolify/source/.env | cut -d'=' -f2-
+  args:
+    executable: /bin/bash
   register: app_key_raw
   changed_when: false
 
