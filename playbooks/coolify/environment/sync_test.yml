@@ -172,11 +172,28 @@
     # =========================================================================
     # PHASE 4: Create resources in lon-eu using API modules
     # =========================================================================
+    - name: "PHASE 4: Get existing services in target environments"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: existing_services
+
+    - name: "PHASE 4: Filter existing services by environment"
+      ansible.builtin.set_fact:
+        lon_eu_existing: "{{ existing_services.json | selectattr('environment_id', 'equalto', 3) | map(attribute='service_type') | list }}"
+        ny_usa_existing: "{{ existing_services.json | selectattr('environment_id', 'equalto', 4) | map(attribute='service_type') | list }}"
+
     - name: "PHASE 4: Plan services for {{ create_env_name }}"
       ansible.builtin.debug:
-        msg: "Will create {{ source_services | length }} services: {{ source_services | map(attribute='service_type') | list | join(', ') }}"
+        msg: |
+          Source has {{ source_services | length }} services: {{ source_services | map(attribute='service_type') | list | join(', ') }}
+          {{ create_env_name }} has: {{ lon_eu_existing | join(', ') or 'none' }}
+          {{ clone_env_name }} has: {{ ny_usa_existing | join(', ') or 'none' }}
 
-    - name: "PHASE 4: Create chatwoot in {{ create_env_name }}"
+    - name: "PHASE 4: Create missing services in {{ create_env_name }}"
       ansible.builtin.uri:
         url: "{{ coolify_api_url }}/services"
         method: POST
@@ -185,35 +202,85 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          type: "chatwoot"
+          type: "{{ item.service_type }}"
           project_uuid: "{{ target_project_uuid }}"
           server_uuid: "{{ server_uuid }}"
           environment_name: "{{ create_env_name }}"
         status_code: [200, 201]
-      register: chatwoot_result
+      loop: "{{ source_services }}"
+      loop_control:
+        label: "{{ item.service_type }}"
+      when: item.service_type not in lon_eu_existing
+      register: lon_eu_created
 
-    - name: "PHASE 4: Display created service"
+    - name: "PHASE 4B: Create missing services in {{ clone_env_name }}"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: "{{ item.service_type }}"
+          project_uuid: "{{ target_project_uuid }}"
+          server_uuid: "{{ server_uuid }}"
+          environment_name: "{{ clone_env_name }}"
+        status_code: [200, 201]
+      loop: "{{ source_services }}"
+      loop_control:
+        label: "{{ item.service_type }}"
+      when: item.service_type not in ny_usa_existing
+      register: ny_usa_created
+
+    - name: "PHASE 4B: Display sync results"
       ansible.builtin.debug:
-        msg: "Created chatwoot: {{ chatwoot_result.json.uuid }}"
+        msg: |
+          {{ create_env_name }}: {{ lon_eu_created.results | selectattr('changed', 'defined') | selectattr('changed') | list | length }} created, {{ lon_eu_created.results | selectattr('skipped', 'defined') | selectattr('skipped') | list | length }} already existed
+          {{ clone_env_name }}: {{ ny_usa_created.results | selectattr('changed', 'defined') | selectattr('changed') | list | length }} created, {{ ny_usa_created.results | selectattr('skipped', 'defined') | selectattr('skipped') | list | length }} already existed
 
     # =========================================================================
-    # PHASE 5: Summary
+    # PHASE 5: Compare environments
     # =========================================================================
-    - name: "PHASE 5: Test Summary"
+    - name: "PHASE 5: Get all services for comparison"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_services_final
+
+    - name: "PHASE 5: Build environment comparison"
+      ansible.builtin.set_fact:
+        lon_eu_services: "{{ all_services_final.json | selectattr('environment_id', 'equalto', 3) | map(attribute='service_type') | list | sort }}"
+        ny_usa_services: "{{ all_services_final.json | selectattr('environment_id', 'equalto', 4) | map(attribute='service_type') | list | sort }}"
+
+    - name: "PHASE 5: Verify environments match"
+      ansible.builtin.assert:
+        that:
+          - lon_eu_services == ny_usa_services
+        fail_msg: "Environments don't match! lon-eu: {{ lon_eu_services }}, ny-usa: {{ ny_usa_services }}"
+        success_msg: "Environments match: {{ lon_eu_services }}"
+
+    # =========================================================================
+    # PHASE 6: Summary
+    # =========================================================================
+    - name: "PHASE 6: Test Summary"
       ansible.builtin.debug:
         msg: |
           ╔══════════════════════════════════════════════════════════════════╗
-          ║              ENVIRONMENT SYNC TEST SUMMARY                       ║
+          ║              ENVIRONMENT SYNC TEST COMPLETE                      ║
           ╠══════════════════════════════════════════════════════════════════╣
           ║                                                                  ║
           ║  Source: {{ source_project.json.name }}/{{ source_environment }}
           ║    - Services: {{ source_services | length }}
-          ║    - Applications: {{ source_applications | length }}
-          ║    - Databases: {{ source_databases | length }}
           ║                                                                  ║
           ║  Target Environments:                                            ║
-          ║    - {{ clone_env_name }}: Ready for clone
-          ║    - {{ create_env_name }}: Ready for API creation
+          ║    - {{ create_env_name }}: {{ lon_eu_services | join(', ') }}
+          ║    - {{ clone_env_name }}: {{ ny_usa_services | join(', ') }}
+          ║                                                                  ║
+          ║  Comparison: {{ 'MATCH' if lon_eu_services == ny_usa_services else 'MISMATCH' }}
           ║                                                                  ║
           ║  State saved to: state/example/production/                       ║
           ║                                                                  ║
