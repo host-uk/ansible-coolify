@@ -48,41 +48,15 @@
 
     - name: Prepare and normalize private key content
       ansible.builtin.set_fact:
-        coolify_private_key_content: >-
-          {%- set content = (local_priv_key.content | default('') | b64decode | trim) if (local_priv_key.content is defined) else (remote_priv_key.content | default('') | b64decode | trim) if (remote_priv_key.content is defined) else '' -%}
-          {{ content ~ '\n' if content != '' else '' }}
+        coolify_private_key_content: "{{ ((local_priv_key.content | b64decode) if (local_priv_key.content is defined) else (remote_priv_key.content | b64decode) if (remote_priv_key.content is defined) else '') | trim }}\n"
       no_log: true
       when: >
         (local_priv_key is defined and local_priv_key.content is defined) or
         (remote_priv_key is defined and remote_priv_key.content is defined)
 
-    - name: Derive Public Key from Private Key (fallback)
-      ansible.builtin.shell: ssh-keygen -y -f -
-      args:
-        stdin: "{{ coolify_private_key_content }}"
-      register: derived_public_key
-      delegate_to: localhost
-      become: false
-      changed_when: false
-      ignore_errors: true
-      when: coolify_private_key_content is defined and coolify_private_key_content != ""
-      no_log: true
-
-    - name: Identify key type
-      ansible.builtin.shell: ssh-keygen -l -f -
-      args:
-        stdin: "{{ coolify_private_key_content }}"
-      register: key_info
-      delegate_to: localhost
-      become: false
-      changed_when: false
-      ignore_errors: true
-      when: coolify_private_key_content is defined and coolify_private_key_content != ""
-      no_log: true
-
-    - name: Convert OPENSSH key to PEM format if needed
+    - name: Process and convert private key if needed
       block:
-        - name: Create temporary file for key conversion
+        - name: Create temporary file for key operations
           ansible.builtin.tempfile:
             state: file
             suffix: _coolify_key
@@ -90,41 +64,66 @@
           delegate_to: localhost
           become: false
 
-        - name: Write temporary key for conversion
+        - name: Write key to temporary file
           ansible.builtin.copy:
             content: "{{ coolify_private_key_content }}"
             dest: "{{ temp_key_file.path }}"
             mode: '0600'
           delegate_to: localhost
           become: false
+          no_log: true
 
-        - name: Convert key using ssh-keygen
+        - name: Derive public key from private key
           ansible.builtin.command:
-            cmd: "ssh-keygen -p -m PEM -f {{ temp_key_file.path }} -N '' -P ''"
+            cmd: "ssh-keygen -y -f {{ temp_key_file.path }}"
+          register: derived_public_key
           delegate_to: localhost
           become: false
-          register: ssh_keygen_result
-          changed_when: ssh_keygen_result.rc == 0
+          changed_when: false
           ignore_errors: true
 
-        - name: Read converted key
-          ansible.builtin.slurp:
-            src: "{{ temp_key_file.path }}"
-          register: converted_key_slurp
+        - name: Identify key type
+          ansible.builtin.command:
+            cmd: "ssh-keygen -l -f {{ temp_key_file.path }}"
+          register: key_info
           delegate_to: localhost
           become: false
-          when: ssh_keygen_result.rc == 0
+          changed_when: false
+          ignore_errors: true
 
-        - name: Update private key content fact if conversion succeeded
-          ansible.builtin.set_fact:
-            coolify_private_key_content: "{{ converted_key_slurp.content | b64decode }}"
-          no_log: true
-          when: 
-            - ssh_keygen_result.rc == 0
-            - converted_key_slurp is defined
-            - converted_key_slurp.content is defined
+        - name: Convert OPENSSH RSA key to PEM format
+          block:
+            - name: Convert key using ssh-keygen
+              ansible.builtin.command:
+                cmd: "ssh-keygen -p -m PEM -f {{ temp_key_file.path }} -N '' -P ''"
+              delegate_to: localhost
+              become: false
+              register: ssh_keygen_result
+              changed_when: ssh_keygen_result.rc == 0
+              ignore_errors: true
+
+            - name: Read converted key
+              ansible.builtin.slurp:
+                src: "{{ temp_key_file.path }}"
+              register: converted_key_slurp
+              delegate_to: localhost
+              become: false
+              when: ssh_keygen_result.rc == 0
+
+            - name: Update private key content fact with PEM format
+              ansible.builtin.set_fact:
+                coolify_private_key_content: "{{ converted_key_slurp.content | b64decode }}"
+              no_log: true
+              when:
+                - ssh_keygen_result.rc == 0
+                - converted_key_slurp is defined
+                - converted_key_slurp.content is defined
+          when:
+            - coolify_private_key_content.startswith('-----BEGIN OPENSSH PRIVATE KEY')
+            - "'RSA' in key_info.stdout | default('')"
+
       always:
-        - name: Remove temporary key
+        - name: Remove temporary key file
           ansible.builtin.file:
             path: "{{ temp_key_file.path }}"
             state: absent
@@ -133,8 +132,7 @@
           when: temp_key_file.path is defined
       when:
         - coolify_private_key_content is defined
-        - coolify_private_key_content.startswith('-----BEGIN OPENSSH PRIVATE KEY')
-        - "'(RSA)' in key_info.stdout | default('')"
+        - coolify_private_key_content != ""
 
     - name: Post Private Key to Coolify API
       block:

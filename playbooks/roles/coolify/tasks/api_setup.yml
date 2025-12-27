@@ -4,65 +4,35 @@
     docker exec coolify php artisan tinker --execute='
     try {
         // Ensure host.docker.internal exists in DB
-        $server = \Illuminate\Support\Facades\DB::table("servers")
-            ->where("ip", "host.docker.internal")
+        $server = \App\Models\Server::where("ip", "host.docker.internal")
             ->orWhere("ip", "127.0.0.1")
             ->orWhere("name", "localhost")
             ->first();
 
         if ($server) {
-             \Illuminate\Support\Facades\DB::table("servers")->where("id", $server->id)->update([
-                 "name" => "host.docker.internal",
-                 "ip" => "host.docker.internal"
-             ]);
-             
+             $server->name = "host.docker.internal";
+             $server->ip = "host.docker.internal";
+             $server->save();
+
              // Try to update the associated private key name too
-             if (isset($server->private_key_id)) {
-                 \Illuminate\Support\Facades\DB::table("private_keys")
-                    ->where("id", $server->private_key_id)
-                    ->update(["name" => "host.docker.internal"]);
+             if ($server->privateKey) {
+                 $server->privateKey->name = "host.docker.internal";
+                 $server->privateKey->save();
              }
         }
 
-        // Enable API and Finish Onboarding via DB to bypass any model issues with ID 0
-        $settings = \Illuminate\Support\Facades\DB::table("instance_settings")->where("id", 0)->first();
-        if (!$settings) {
-            $settings = \Illuminate\Support\Facades\DB::table("instance_settings")->first();
-        }
-        
+        // Enable API and Finish Onboarding using Model for proper persistence
+        $settings = \App\Models\InstanceSettings::first();
         if ($settings) {
-            $allowed_ips = array_filter(explode(",", $settings->allowed_ips ?? ""));
-            if (!in_array("127.0.0.1", $allowed_ips)) {
-                $allowed_ips[] = "127.0.0.1";
-            }
-            $public_ip = "{{ ansible_host }}";
-            if ($public_ip && !in_array($public_ip, $allowed_ips)) {
-                $allowed_ips[] = $public_ip;
-            }
-            
-            \Illuminate\Support\Facades\DB::table("instance_settings")->where("id", $settings->id)->update([
-                "is_api_enabled" => true,
-                "is_onboarding_finished" => true,
-                "allowed_ips" => implode(",", $allowed_ips)
-            ]);
+            $settings->is_api_enabled = true;
+            $settings->is_onboarding_finished = true;
+            // 0.0.0.0 is the special value that allows all IPs in Coolify
+            $settings->allowed_ips = "0.0.0.0";
+            $settings->save();
             echo "COOLIFY_INITIALIZED\n";
         } else {
-             // Fallback to creation if none exists. Try to force ID 0 but be graceful.
-             try {
-                 \Illuminate\Support\Facades\DB::table("instance_settings")->insert([
-                    "id" => 0,
-                    "is_api_enabled" => true,
-                    "is_onboarding_finished" => true,
-                    "allowed_ips" => "127.0.0.1,{{ ansible_host }}"
-                 ]);
-             } catch (\Exception $e) {
-                 \Illuminate\Support\Facades\DB::table("instance_settings")->insert([
-                    "is_api_enabled" => true,
-                    "is_onboarding_finished" => true,
-                    "allowed_ips" => "127.0.0.1,{{ ansible_host }}"
-                 ]);
-             }
-             echo "COOLIFY_INITIALIZED\n";
+             echo "INIT_ERROR: No instance settings found\n";
+             exit(1);
         }
     } catch (\Exception $e) {
         echo "INIT_ERROR: " . $e->getMessage() . "\n";
@@ -263,31 +233,39 @@
 - name: Set API Token fact from command result
   ansible.builtin.set_fact:
     coolify_api_token: "{{ api_token_result.stdout | trim }}"
-  when: 
+  when:
     - not token_file_stat.stat.exists
     - api_token_result is defined
     - api_token_result.stdout is defined and api_token_result.stdout != ""
   no_log: true
 
-#- name: Validate API Token (BETA)
-#  ansible.builtin.uri:
-#    url: "{{ coolify_api_base_url }}/version"
-#    method: GET
-#    headers:
-#      Authorization: "Bearer {{ coolify_api_token }}"
-#    status_code: 200
-#  register: api_version_check
-#  when:
-#    - not ansible_check_mode
-#    - coolify_api_token != ""
-#  ignore_errors: true
-#
-#- name: Warn if API Token is invalid
-#  ansible.builtin.debug:
-#    msg: "WARNING: Coolify API validation failed. This usually means the API is disabled or the token is incorrect. You may need to register servers manually in the Coolify UI."
-#  when: coolify_api_token == "" or (api_version_check.failed | default(false)) or (api_version_check.status | default(0) != 200)
-#
-#- name: Set API success fact
-#  ansible.builtin.set_fact:
-#    coolify_api_ready: "{{ not (api_version_check.failed | default(true)) and (api_version_check.status | default(0) == 200) }}"
+- name: Wait for Coolify API to be ready
+  ansible.builtin.uri:
+    url: "{{ coolify_api_base_url }}/version"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: api_version_check
+  until: api_version_check.status == 200
+  retries: 30
+  delay: 5
+  when:
+    - not ansible_check_mode
+    - coolify_api_token | default('') != ''
+  ignore_errors: true
+
+- name: Warn if API Token validation failed
+  ansible.builtin.debug:
+    msg: "WARNING: Coolify API validation failed. This usually means the API is disabled or the token is incorrect. You may need to register servers manually in the Coolify UI."
+  when:
+    - coolify_api_token | default('') == '' or (api_version_check.failed | default(true))
+
+- name: Set API ready fact
+  ansible.builtin.set_fact:
+    coolify_api_ready: "{{ (coolify_api_token | default('') != '') and (not (api_version_check.failed | default(true))) and (api_version_check.status | default(0) == 200) }}"
+
+- name: Display API status
+  ansible.builtin.debug:
+    msg: "Coolify API is {{ 'ready' if coolify_api_ready else 'NOT ready' }} (token={{ 'set' if coolify_api_token else 'missing' }})"
 

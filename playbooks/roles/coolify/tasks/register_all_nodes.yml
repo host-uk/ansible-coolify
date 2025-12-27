@@ -1,0 +1,72 @@
+---
+# Register all worker nodes with Coolify controller
+# This task file orchestrates the registration of all servers in the coolify_server list
+
+- name: Read API token from host if not already set
+  when: coolify_api_token | default('') == ''
+  block:
+    - name: Check if API token file exists
+      ansible.builtin.stat:
+        path: /data/coolify/ansible-token
+      register: token_file
+
+    - name: Read API token from file
+      ansible.builtin.slurp:
+        src: /data/coolify/ansible-token
+      register: token_content
+      when: token_file.stat.exists
+
+    - name: Set API token from file
+      ansible.builtin.set_fact:
+        coolify_api_token: "{{ token_content.content | b64decode | trim }}"
+        coolify_api_ready: true
+      when: token_file.stat.exists and token_content.content is defined
+
+- name: Validate prerequisites for node registration
+  ansible.builtin.assert:
+    that:
+      - coolify_api_token | default('') != ''
+      - coolify_register_server | default(true) | bool
+    fail_msg: "Node registration requires coolify_api_token to be set and coolify_register_server to be true"
+    success_msg: "Prerequisites validated for node registration"
+
+- name: Get list of servers to register
+  ansible.builtin.set_fact:
+    servers_to_register: "{{ coolify_server | default([]) }}"
+
+- name: Display servers to register
+  ansible.builtin.debug:
+    msg: |
+      Servers to register with Coolify:
+      {% for server in servers_to_register %}
+        - {{ server }} ({{ 'builder' if 'builder' in (hostvars[server]['labels'] | default([])) else 'server' }})
+      {% endfor %}
+  when: servers_to_register | length > 0
+
+- name: Skip if no servers to register
+  ansible.builtin.debug:
+    msg: "No servers found to register. Check coolify_server variable and inventory."
+  when: servers_to_register | length == 0
+
+- name: Register builder nodes first
+  ansible.builtin.include_tasks: register_node.yml
+  vars:
+    node_to_register: "{{ item }}"
+  loop: "{{ servers_to_register | select('in', groups['builder'] | default([])) | list }}"
+  when:
+    - servers_to_register | length > 0
+    - groups['builder'] is defined
+    - item in groups['builder']
+
+- name: Register non-builder server nodes
+  ansible.builtin.include_tasks: register_node.yml
+  vars:
+    node_to_register: "{{ item }}"
+  loop: "{{ servers_to_register }}"
+  when:
+    - servers_to_register | length > 0
+    - "'builder' not in (hostvars[item]['labels'] | default([]))"
+
+- name: Node registration complete
+  ansible.builtin.debug:
+    msg: "Node registration process completed. Check Coolify UI to verify server connectivity."

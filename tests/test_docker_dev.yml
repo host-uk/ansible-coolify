@@ -1,0 +1,78 @@
+---
+- name: Test Docker Development Environment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # Use a separate test network and container set
+    docker_dev_name_prefix: "coolify-test"
+    docker_dev_network_name: "coolify-test-net"
+    docker_dev_network_subnet: "172.29.0.0/16"
+    docker_dev_network_gateway: "172.29.0.1"
+    docker_dev_compose_path: "./docker-test"
+    docker_dev_logs_path: "./docker-test-logs"
+    # Single container for quick testing
+    docker_dev_containers:
+      - name: test-controller
+        hostname: test-controller.lan
+        ip: "172.29.0.10"
+        labels: [controller]
+        resources:
+          cpu: "1"
+          memory: "1g"
+
+  tasks:
+    - name: Verify Docker is available
+      ansible.builtin.command: docker info
+      register: docker_info
+      changed_when: false
+      failed_when: docker_info.rc != 0
+
+    - name: Run docker_dev role
+      ansible.builtin.include_role:
+        name: docker_dev
+
+    - name: Verify container is running
+      ansible.builtin.command: >
+        docker inspect --format='{{ '{{' }}.State.Running{{ '}}' }}' coolify-test-test-controller
+      register: container_running
+      changed_when: false
+      failed_when: container_running.stdout != 'true'
+
+    - name: Verify SSH connectivity
+      ansible.builtin.wait_for:
+        host: "172.29.0.10"
+        port: 22
+        timeout: 30
+
+    - name: Test SSH connection to container
+      ansible.builtin.command: >
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+        -i {{ (docker_dev_ssh_keys_path | default('~/.ssh') | expanduser) }}/test-controller.lan
+        root@172.29.0.10 "echo 'SSH connection successful'"
+      register: ssh_test
+      changed_when: false
+
+    - name: Display SSH test result
+      ansible.builtin.debug:
+        msg: "{{ ssh_test.stdout }}"
+
+    - name: Cleanup test containers
+      ansible.builtin.command: >
+        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
+      changed_when: true
+
+    - name: Cleanup test directories (may require manual cleanup if permission denied)
+      ansible.builtin.shell: rm -rf {{ item }} 2>/dev/null || true
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      changed_when: true
+      ignore_errors: true
+
+    - name: Test passed
+      ansible.builtin.debug:
+        msg: "Docker development environment test completed successfully!"
+
+  tags:
+    - test

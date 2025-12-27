@@ -17,6 +17,7 @@
     regexp: '^127\.0\.0\.1'
     line: "127.0.0.1 localhost {{ inventory_hostname }} host.docker.internal"
     state: present
+    unsafe_writes: true  # Required for Docker containers where /etc/hosts is mounted
   when: ansible_os_family == 'Debian'
 
 - name: Check if Coolify is already installed
@@ -103,7 +104,25 @@
       ansible.builtin.file:
         path: /tmp/coolify_ssh_keys.tar.gz
         state: absent
-  when: 
+  when:
     - ansible_os_family == 'Debian'
     - coolify_env_file.stat.exists
+
+# Automatic API and key setup for node registration
+- name: Setup Coolify API and Keys
+  when:
+    - ansible_os_family == 'Debian'
+    - coolify_auto_setup_enabled | default(true) | bool
+  block:
+    - name: Detect existing Coolify keys
+      ansible.builtin.include_tasks: detect_keys.yml
+
+    - name: Setup Coolify API and create token
+      ansible.builtin.include_tasks: api_setup.yml
+
+    - name: Setup host.docker.internal key
+      ansible.builtin.include_tasks: key_setup.yml
+      vars:
+        coolify_key_name: "host.docker.internal"
+        coolify_save_to_state: true
 

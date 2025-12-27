@@ -1,0 +1,117 @@
+---
+# Register a single worker node with Coolify controller
+# Input variable: node_to_register (hostname from the loop in register_all_nodes.yml)
+
+- name: Set node facts
+  ansible.builtin.set_fact:
+    current_node_hostname: "{{ node_to_register }}"
+    current_node_ip: "{{ hostvars[node_to_register]['private_ip'] | default(hostvars[node_to_register]['ansible_host']) }}"
+    current_node_key_path: "{{ hostvars[node_to_register]['ansible_ssh_private_key_file'] | default('') }}"
+    current_node_is_builder: "{{ 'builder' in (hostvars[node_to_register]['labels'] | default([])) }}"
+
+- name: Skip if trying to register controller itself
+  ansible.builtin.debug:
+    msg: "Skipping self-registration for {{ current_node_hostname }}"
+  when: >
+    current_node_hostname == inventory_hostname or
+    current_node_ip in ['127.0.0.1', 'localhost', 'host.docker.internal']
+
+- name: Register node with Coolify
+  when: >
+    current_node_hostname != inventory_hostname and
+    current_node_ip not in ['127.0.0.1', 'localhost', 'host.docker.internal']
+  block:
+    - name: Register SSH key for node
+      ansible.builtin.include_tasks: key_setup.yml
+      vars:
+        coolify_key_name: "{{ current_node_hostname }}"
+        coolify_private_key_path: "{{ current_node_key_path }}"
+        coolify_save_to_state: true
+
+    - name: Add node IP to Coolify allowed_ips
+      ansible.builtin.shell: |
+        docker exec coolify php artisan tinker --execute='
+        try {
+            $settings = \App\Models\InstanceSettings::first();
+            if ($settings) {
+                $ips = array_filter(explode(",", $settings->allowed_ips ?? ""));
+                if (!in_array("{{ current_node_ip }}", $ips)) {
+                    $ips[] = "{{ current_node_ip }}";
+                    $settings->allowed_ips = implode(",", $ips);
+                    $settings->save();
+                    echo "IP_ADDED";
+                } else {
+                    echo "IP_EXISTS";
+                }
+            } else {
+                echo "NO_SETTINGS";
+            }
+        } catch (\Exception $e) {
+            echo "ERROR: " . $e->getMessage();
+        }
+        '
+      register: add_ip_result
+      changed_when: "'IP_ADDED' in add_ip_result.stdout"
+      failed_when: "'ERROR' in add_ip_result.stdout"
+
+    - name: Distribute Coolify public key to node
+      ansible.posix.authorized_key:
+        user: root
+        state: present
+        key: "{{ coolify_public_key }}"
+      delegate_to: "{{ current_node_hostname }}"
+      when: coolify_public_key | default('') != ''
+
+    - name: Get existing servers from Coolify
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200]
+      register: servers_list
+      ignore_errors: true
+
+    - name: Check if server already registered
+      ansible.builtin.set_fact:
+        server_already_registered: "{{ (servers_list.json | default([]) | selectattr('ip', 'equalto', current_node_ip) | list | length > 0) or (servers_list.json | default([]) | selectattr('name', 'equalto', current_node_hostname) | list | length > 0) }}"
+      when: servers_list is succeeded
+
+    - name: Register server via Coolify API
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ current_node_hostname }}"
+          description: "Registered via Ansible"
+          ip: "{{ current_node_ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ coolify_key_uuid }}"
+          is_build_server: "{{ current_node_is_builder }}"
+          instant_validate: false
+        status_code: [200, 201]
+      register: create_server_result
+      when:
+        - not (server_already_registered | default(false))
+        - coolify_key_uuid | default('') != ''
+
+    - name: Log server registration result
+      ansible.builtin.debug:
+        msg: >
+          {% if server_already_registered | default(false) %}
+          Server {{ current_node_hostname }} ({{ current_node_ip }}) already registered in Coolify
+          {% elif create_server_result is defined and create_server_result is succeeded %}
+          Successfully registered {{ current_node_hostname }} ({{ current_node_ip }}) with UUID: {{ create_server_result.json.uuid | default('unknown') }}
+          {% else %}
+          Failed to register {{ current_node_hostname }}
+          {% endif %}
+
+  rescue:
+    - name: Warn about registration failure
+      ansible.builtin.debug:
+        msg: "WARNING: Failed to register node {{ current_node_hostname }} ({{ current_node_ip }}). Error: {{ ansible_failed_result.msg | default('Unknown error') }}"

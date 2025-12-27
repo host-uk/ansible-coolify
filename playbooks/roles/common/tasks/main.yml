@@ -9,6 +9,7 @@
     path: /etc/hosts
     regexp: '^127\.0\.0\.1'
     line: "127.0.0.1 localhost {{ inventory_hostname }}"
+    unsafe_writes: true  # Required for Docker containers where /etc/hosts is mounted
   when: ansible_os_family == 'Debian'
 
 - name: Update package lists

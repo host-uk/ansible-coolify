@@ -1,4 +1,28 @@
 ---
+- name: Prepare Docker Development Containers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  pre_tasks:
+    - name: Ensure ssh-agent is running
+      ansible.builtin.shell: |
+        if ! pgrep -u "{{ lookup('env', 'USER') }}" ssh-agent > /dev/null; then
+          ssh-agent -s
+        fi
+      register: ssh_agent_setup
+      changed_when: "'Agent pid' in ssh_agent_setup.stdout"
+
+  tasks:
+    - name: Ensure Docker containers are ready
+      ansible.builtin.include_role:
+        name: docker_dev
+      when:
+        - groups['development'] is defined
+        - groups['development'] | length > 0
+        - hostvars[groups['development'] | first].platform | default('') == 'docker'
+  tags:
+    - docker_dev
+
 - name: Prepare Parallels VMs for development
   hosts: localhost
   connection: local
@@ -20,7 +44,7 @@
         parallels_vm_name: "{{ item | replace('.lan', '') }}"
         parallels_vm_ssh_private_key_file: "{{ hostvars[item].ansible_ssh_private_key_file }}"
       loop: "{{ groups['development'] | default([]) }}"
-      when: 
+      when:
         - groups['development'] is defined
         - hostvars[item].platform | default('') == 'parallels'
   tags:
@@ -51,13 +75,16 @@
   roles:
     - role: common
 
-#- name: Register Nodes in Coolify
-#  hosts: controller
-#  become: true
-#  become_user: root
-#  gather_facts: true
-#  tasks:
-#    - name: Register Nodes
-#      ansible.builtin.include_role:
-#        name: coolify
-#        tasks_from: register_all_nodes.yml
+- name: Register Nodes in Coolify
+  hosts: controller
+  become: true
+  become_user: root
+  gather_facts: true
+  tasks:
+    - name: Register Nodes
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: register_all_nodes.yml
+      when: coolify_register_server | default(true) | bool
+  tags:
+    - register_nodes

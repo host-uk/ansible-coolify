@@ -136,6 +136,14 @@ help:
 	@echo "  down               - Stop and remove the Ansible container"
 	@echo "  shell              - Open a shell in the running Ansible container"
 	@echo ""
+	@echo "Available targets (Docker Dev Environment):"
+	@echo "  docker-dev-up      - Create and start Docker dev containers"
+	@echo "  docker-dev-down    - Stop Docker dev containers"
+	@echo "  docker-dev-destroy - Remove containers, volumes, and images"
+	@echo "  docker-dev-logs    - Follow all container logs"
+	@echo "  docker-dev-status  - Show container status"
+	@echo "  docker-dev-shell-* - Shell into container (e.g., docker-dev-shell-controller)"
+	@echo ""
 	@echo "Available targets (Production):"
 	@echo "  prod-backup        - Backup Coolify for prod"
 	@echo "  prod-deploy        - Run deployment for prod"
@@ -195,7 +203,10 @@ native-start-agent:
 		echo "ssh-agent is already running."; \
 	fi
 
-native-test: native-test-syntax native-test-logic native-test-parallels
+native-test: native-test-syntax native-test-logic native-test-docker native-test-parallels
+
+native-test-docker:
+	$(MAKE) _run-pb PB=tests/test_docker_dev.yml
 
 native-test-logic:
 	$(MAKE) _run-pb PB=tests/test_coolify_token.yml
@@ -222,6 +233,53 @@ down:
 
 shell:
 	docker compose exec ansible /bin/bash
+
+# --- Docker Dev Environment Targets ---
+
+DOCKER_DEV_COMPOSE = docker compose -f playbooks/coolify/docker-dev/docker-compose.yml
+
+docker-dev-up:
+	@echo "Starting Docker development containers..."
+	ansible-playbook -i inventory/ playbooks/coolify/create.yml --tags docker_dev
+	@echo ""
+	@echo "Docker development environment is ready!"
+	@echo "Run 'make docker-dev-logs' to follow container logs"
+	@echo "Run 'make docker-dev-status' to check container status"
+
+docker-dev-deploy:
+	@echo "Deploying Coolify to Docker development environment..."
+	$(MAKE) _run-pb PB=playbooks/coolify/create.yml LIMIT=development
+
+docker-dev-down:
+	$(DOCKER_DEV_COMPOSE) down
+
+docker-dev-destroy:
+	$(DOCKER_DEV_COMPOSE) down -v --rmi local
+	rm -rf docker-dev-logs/
+
+docker-dev-logs:
+	$(DOCKER_DEV_COMPOSE) logs -f
+
+docker-dev-logs-controller:
+	$(DOCKER_DEV_COMPOSE) logs -f controller
+
+docker-dev-logs-builder:
+	$(DOCKER_DEV_COMPOSE) logs -f builder
+
+docker-dev-shell-controller:
+	docker exec -it coolify-dev-controller /bin/bash
+
+docker-dev-shell-builder:
+	docker exec -it coolify-dev-builder /bin/bash
+
+docker-dev-shell-%:
+	docker exec -it coolify-dev-$* /bin/bash
+
+docker-dev-status:
+	$(DOCKER_DEV_COMPOSE) ps
+
+docker-dev-restart:
+	$(DOCKER_DEV_COMPOSE) restart
 
 # --- Production Targets ---
 
@@ -336,8 +394,10 @@ _run-docker:
 	dev-sync-apps dev-test-install-config dev-uninstall dev-uninstall-app dev-uninstall-db dev-uninstall-service \
 	help \
 	up down shell \
+	docker-dev-up docker-dev-down docker-dev-destroy docker-dev-logs docker-dev-logs-controller docker-dev-logs-builder \
+	docker-dev-shell-controller docker-dev-shell-builder docker-dev-status docker-dev-restart \
 	native-build-ansible native-clean native-docker-lint native-docker-test native-install-deps native-lint \
-	native-setup native-start-agent native-test native-test-logic native-test-parallels native-test-syntax native-update-deps \
+	native-setup native-start-agent native-test native-test-docker native-test-logic native-test-parallels native-test-syntax native-update-deps \
 	prod-backup prod-clear-host-uk-lon prod-clone-app-de-eu prod-clone-env prod-clone-env-pb prod-clone-host-uk-lon \
 	prod-create-app prod-create-db prod-create-service prod-deploy prod-docker-deploy prod-empty-env prod-empty-env-pb \
 	prod-hetzner-setup prod-login prod-reinstall prod-restore prod-restore-app prod-restore-db prod-restore-service \

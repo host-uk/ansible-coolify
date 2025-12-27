@@ -1,0 +1,63 @@
+---
+# Docker Development Environment Configuration
+
+# Container naming prefix
+docker_dev_name_prefix: "coolify-dev"
+
+# Docker network configuration
+docker_dev_network_name: "coolify-dev-net"
+docker_dev_network_subnet: "172.28.0.0/16"
+docker_dev_network_gateway: "172.28.0.1"
+
+# Base image configuration
+docker_dev_base_image: "ubuntu:24.04"
+docker_dev_image_name: "coolify-dev-systemd"
+
+# Default container resource limits
+docker_dev_cpu_limit: "2"
+docker_dev_memory_limit: "2g"
+
+# SSH configuration
+docker_dev_ssh_key_type: "rsa"
+docker_dev_ssh_key_bits: 4096
+docker_dev_ssh_keys_path: "~/.ssh"
+
+# Container definitions - matches inventory pattern
+docker_dev_containers:
+  - name: controller
+    hostname: controller.lan
+    ip: "172.28.0.10"
+    labels: [controller]
+    resources:
+      cpu: "2"
+      memory: "4g"
+  - name: app-server-1
+    hostname: app-server-1.lan
+    ip: "172.28.0.20"
+    labels: [server]
+    resources:
+      cpu: "2"
+      memory: "2g"
+  - name: app-server-2
+    hostname: app-server-2.lan
+    ip: "172.28.0.21"
+    labels: [server]
+    resources:
+      cpu: "2"
+      memory: "2g"
+  - name: builder
+    hostname: builder.lan
+    ip: "172.28.0.30"
+    labels: [builder, server]
+    resources:
+      cpu: "4"
+      memory: "4g"
+
+# Log volume path (relative to project root)
+docker_dev_logs_path: "./docker-dev-logs"
+
+# Docker Compose project directory (relative to project root)
+docker_dev_compose_path: "./docker-dev"
+
+# SSH user for containers
+docker_dev_ssh_user: root

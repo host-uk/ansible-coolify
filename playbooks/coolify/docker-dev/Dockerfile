@@ -1,0 +1,81 @@
+# Systemd-enabled Ubuntu container for Coolify development
+# This Dockerfile creates a container that behaves like a real server
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV container=docker
+
+# Install systemd and required packages
+RUN apt-get update && apt-get install -y \
+    systemd \
+    systemd-sysv \
+    openssh-server \
+    sudo \
+    curl \
+    wget \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    python3 \
+    python3-apt \
+    ufw \
+    fail2ban \
+    iproute2 \
+    iputils-ping \
+    net-tools \
+    vim \
+    git \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure SSH - Ubuntu 24.04 uses ssh.socket for socket activation
+RUN mkdir -p /var/run/sshd && \
+    mkdir -p /root/.ssh && \
+    chmod 700 /root/.ssh && \
+    sed -i 's/#PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# Install Docker
+RUN curl -fsSL https://get.docker.com | sh
+
+# Configure Docker for nested container operation (DIND)
+# Use vfs storage driver since overlayfs doesn't work nested
+# Create a base config that will be merged with any runtime changes
+RUN mkdir -p /etc/docker && \
+    echo '{"storage-driver": "vfs"}' > /etc/docker/daemon.json
+
+# Create a systemd service to ensure vfs storage-driver persists
+# This runs before Docker starts and ensures storage-driver is always set
+RUN mkdir -p /etc/systemd/system/docker.service.d && \
+    printf '[Service]\nExecStartPre=/bin/bash -c '\''if [ -f /etc/docker/daemon.json ]; then jq -s ".[0] * {\"storage-driver\": \"vfs\"}" /etc/docker/daemon.json > /tmp/daemon.json.tmp && mv /tmp/daemon.json.tmp /etc/docker/daemon.json; else echo "{\"storage-driver\": \"vfs\"}" > /etc/docker/daemon.json; fi || echo "{\"storage-driver\": \"vfs\"}" > /etc/docker/daemon.json'\''\n' > /etc/systemd/system/docker.service.d/vfs-storage.conf
+
+# Install jq for JSON manipulation in the service
+RUN apt-get update && apt-get install -y jq && rm -rf /var/lib/apt/lists/*
+
+# Clean up systemd units that don't work in containers (but preserve SSH and Docker)
+RUN cd /lib/systemd/system/sysinit.target.wants/ && \
+    ls | grep -v systemd-tmpfiles-setup | xargs rm -f 2>/dev/null || true && \
+    rm -f /lib/systemd/system/local-fs.target.wants/* && \
+    rm -f /lib/systemd/system/sockets.target.wants/*udev* && \
+    rm -f /lib/systemd/system/sockets.target.wants/*initctl* && \
+    rm -f /lib/systemd/system/anaconda.target.wants/* && \
+    rm -f /lib/systemd/system/plymouth* && \
+    rm -f /lib/systemd/system/systemd-update-utmp*
+
+# Enable SSH socket and Docker after cleanup
+RUN systemctl enable ssh.socket && \
+    systemctl enable docker
+
+# Create directory for logs
+RUN mkdir -p /var/log/coolify
+
+# Volume for cgroup
+VOLUME ["/sys/fs/cgroup"]
+
+# Expose SSH and Coolify-related ports
+EXPOSE 22 80 443 6001 6002 8000
+
+# Use systemd as init
+STOPSIGNAL SIGRTMIN+3
+CMD ["/lib/systemd/systemd"]

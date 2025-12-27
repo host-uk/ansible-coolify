@@ -7,3 +7,9 @@ dev/
 state/
 inventory/inventory.yml
 /.output.txt
+ansible-cloudns-master/
+
+# Docker dev logs (generated at runtime)
+**/docker-dev-logs/
+**/docker-test-logs/
+__pycache__/

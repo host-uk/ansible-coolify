@@ -1,0 +1,36 @@
+---
+# Docker Development Environment Inventory
+# These hosts are managed by the docker_dev role
+all:
+  children:
+    development:
+      hosts:
+        controller.lan:
+          ansible_host: 172.28.0.10
+          ansible_ssh_private_key_file: ~/.ssh/controller.lan
+          platform: docker
+          labels: [controller]
+          private_ip: 172.28.0.10
+        app-server-1.lan:
+          ansible_host: 172.28.0.20
+          ansible_ssh_private_key_file: ~/.ssh/app-server-1.lan
+          platform: docker
+          labels: [server]
+          private_ip: 172.28.0.20
+        app-server-2.lan:
+          ansible_host: 172.28.0.21
+          ansible_ssh_private_key_file: ~/.ssh/app-server-2.lan
+          platform: docker
+          labels: [server]
+          private_ip: 172.28.0.21
+        builder.lan:
+          ansible_host: 172.28.0.30
+          ansible_ssh_private_key_file: ~/.ssh/builder.lan
+          platform: docker
+          labels: [builder, server]
+          private_ip: 172.28.0.30
+      vars:
+        coolify_private_key_path: "~/.ssh/controller.lan"
+        public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/controller.lan.pub', errors='ignore') }}"
+        # Docker containers use eth0 for everything
+        private_network_interface: eth0

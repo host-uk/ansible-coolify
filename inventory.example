@@ -35,24 +35,49 @@ all:
         ansible_ssh_private_key_file: "~/.ssh/your-key"
         coolify_private_key_path: "~/.ssh/your-key"
         public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/your-key.pub', errors='ignore') }}"
+    # Development with Parallels VMs (macOS)
+    # development:
+    #   hosts:
+    #     controller.lan:
+    #       ansible_ssh_private_key_file: ~/.ssh/controller.lan
+    #       platform: parallels
+    #       labels: [controller]
+    #     app-server.lan:
+    #       ansible_ssh_private_key_file: ~/.ssh/app-server.lan
+    #       platform: parallels
+    #       labels: [server]
+    #     builder.lan:
+    #       ansible_ssh_private_key_file: ~/.ssh/builder.lan
+    #       platform: parallels
+    #       labels: [builder, server]
+    #   vars:
+    #     coolify_private_key_path: "~/.ssh/controller.lan"
+    #     public_key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/controller.lan.pub', errors='ignore') }}"
+
+    # Development with Docker containers (Linux/macOS/Windows)
+    # The docker_dev role automatically manages container IPs and SSH keys
     development:
       hosts:
         controller.lan:
           ansible_ssh_private_key_file: ~/.ssh/controller.lan
-          platform: parallels
+          platform: docker
           labels: [controller]
-          # S3 Storage (Unified)
+          # S3 Storage (optional for dev)
           s3_enabled: true
           s3_endpoint: "https://fsn1.your-objectstorage.com"
           s3_bucket: "your-public-bucket"
           s3_region: "fsn1"
-        app-server.lan:
-          ansible_ssh_private_key_file: ~/.ssh/app-server.lan
-          platform: parallels
+        app-server-1.lan:
+          ansible_ssh_private_key_file: ~/.ssh/app-server-1.lan
+          platform: docker
+          labels: [server]
+        app-server-2.lan:
+          ansible_ssh_private_key_file: ~/.ssh/app-server-2.lan
+          platform: docker
           labels: [server]
         builder.lan:
           ansible_ssh_private_key_file: ~/.ssh/builder.lan
-          platform: parallels
+          platform: docker
           labels: [builder, server]
       vars:
         coolify_private_key_path: "~/.ssh/controller.lan"

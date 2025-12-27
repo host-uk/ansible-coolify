@@ -1,0 +1,117 @@
+---
+# Docker Development Environment - Main Task File
+# Creates and manages systemd-enabled Docker containers for Coolify development
+
+- name: Verify Docker is available
+  ansible.builtin.command: docker info
+  register: docker_info
+  changed_when: false
+  failed_when: docker_info.rc != 0
+  delegate_to: localhost
+
+- name: Create Docker development directory
+  ansible.builtin.file:
+    path: "{{ docker_dev_compose_path }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+
+- name: Create log directories for each container
+  ansible.builtin.file:
+    path: "{{ docker_dev_logs_path }}/{{ item.name }}"
+    state: directory
+    mode: '0755'
+  loop: "{{ docker_dev_containers }}"
+  delegate_to: localhost
+
+- name: Generate SSH keys for each container
+  community.crypto.openssh_keypair:
+    path: "{{ (docker_dev_ssh_keys_path | expanduser) }}/{{ item.hostname }}"
+    type: "{{ docker_dev_ssh_key_type }}"
+    size: "{{ docker_dev_ssh_key_bits }}"
+    state: present
+    force: false
+  loop: "{{ docker_dev_containers }}"
+  delegate_to: localhost
+
+- name: Generate Dockerfile
+  ansible.builtin.template:
+    src: Dockerfile.j2
+    dest: "{{ docker_dev_compose_path }}/Dockerfile"
+    mode: '0644'
+  delegate_to: localhost
+  register: dockerfile_result
+
+- name: Generate docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ docker_dev_compose_path }}/docker-compose.yml"
+    mode: '0644'
+  delegate_to: localhost
+  register: compose_result
+
+- name: Check if containers are running
+  ansible.builtin.command: >
+    docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml ps -q
+  register: running_containers
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+
+- name: Build Docker image
+  ansible.builtin.command: >
+    docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml build {{ docker_dev_containers[0].name }}
+  delegate_to: localhost
+  when: dockerfile_result.changed or running_containers.stdout_lines | length == 0
+  changed_when: true
+
+- name: Start containers
+  ansible.builtin.command: >
+    docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml up -d
+  delegate_to: localhost
+  when: compose_result.changed or running_containers.stdout_lines | length != docker_dev_containers | length
+  changed_when: true
+
+- name: Wait for containers to be healthy
+  ansible.builtin.command: >
+    docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
+  register: health_check
+  until: health_check.stdout == 'healthy'
+  retries: 30
+  delay: 5
+  loop: "{{ docker_dev_containers }}"
+  delegate_to: localhost
+  changed_when: false
+
+- name: Wait for SSH to be reachable on each container
+  ansible.builtin.wait_for:
+    host: "{{ item.ip }}"
+    port: 22
+    delay: 2
+    timeout: 120
+  loop: "{{ docker_dev_containers }}"
+  delegate_to: localhost
+
+- name: Update inventory ansible_host for Docker containers
+  ansible.builtin.set_fact:
+    ansible_host: "{{ item.ip }}"
+    ansible_ssh_private_key_file: "{{ (docker_dev_ssh_keys_path | expanduser) }}/{{ item.hostname }}"
+    platform: docker
+    labels: "{{ item.labels }}"
+    private_ip: "{{ item.ip }}"
+  delegate_to: "{{ item.hostname }}"
+  delegate_facts: true
+  loop: "{{ docker_dev_containers }}"
+
+- name: Display container status
+  ansible.builtin.debug:
+    msg: |
+      Docker development environment ready!
+
+      Containers:
+      {% for container in docker_dev_containers %}
+        - {{ container.name }} ({{ container.hostname }}): {{ container.ip }}
+      {% endfor %}
+
+      To view logs: docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml logs -f
+      Persistent logs: {{ docker_dev_logs_path }}/<container>/
