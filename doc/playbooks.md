@@ -29,6 +29,17 @@ These playbooks are specialized for managing individual resources via the Coolif
 - **Environment** (`playbooks/coolify/environment/`)
     - `clone.yml`: Clones an entire environment (apps, dbs, services) from one project/environment to another.
     - `empty.yml`: Deletes all resources within a specific environment.
+    - `restore.yml`: Restores services from local state folder to Coolify API.
+    - `move.yml`: Moves/clones services between environments with optional source deletion.
+    - `sync_test.yml`: Demonstrates environment sync and comparison patterns.
+
+- **Templates** (`playbooks/coolify/template/`)
+    - `save.yml`: Save environment as reusable template.
+    - `apply.yml`: Create services from saved template.
+    - `list.yml`: List available templates.
+
+- **Backup Detection** (`playbooks/coolify/`)
+    - `backup_check.yml`: Compare local state against live API to detect NEW/MODIFIED/DELETED resources.
 
 #### Running Playbooks
 

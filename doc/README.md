@@ -59,6 +59,7 @@ The project defines clear personas to guide interaction with the platform:
 - **System Hardening**: The `common` role applies SSH hardening, UFW firewall rules, and Fail2Ban.
 - **State Persistence**: Critical application keys and database backups are fetched locally to ensure recoverability.
 - **Resource Cloning**: Support for cloning environments and applications across different servers or regions.
+- **Environment Helpers**: Backup detection, restore, templates, and move operations for managing resources across environments.
 - **Worker Registration**: Automatically registers worker nodes into the Coolify controller.
 - **S3 Integration**: Support for both private (infrastructure backup) and public (application storage) buckets on Hetzner Object Storage.
 
@@ -71,6 +72,7 @@ The project defines clear personas to guide interaction with the platform:
 | [Playbooks](playbooks.md) | Playbook reference |
 | [Ansible Roles](ansible_roles.md) | Role documentation |
 | [State Management](state_management.md) | Backup and state handling |
+| [Environment Helpers](environment_helpers.md) | Backup, restore, templates, move |
 | [Docker Dev Environment](docker_dev.md) | Local development with Docker |
 | [Testing](testing.md) | Test suite documentation |
 | [API Modules](api_modules.md) | Coolify API Ansible modules |
