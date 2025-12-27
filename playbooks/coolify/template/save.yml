@@ -1,0 +1,273 @@
+---
+# Save Environment as Template
+# Extracts service configurations and saves as reusable template
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/template/save.yml \
+#     -e project=example -e env_name=lon-eu -e template_name=my-stack
+#
+# Creates:
+#   templates/<template_name>/
+#     - template.yml      # Template metadata
+#     - services.yml      # Service definitions (sanitized)
+#     - envs/             # Environment variable templates
+
+- name: Save Environment as Template
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    # API settings
+    coolify_api_url: "http://172.28.0.10:8000/api/v1"
+    coolify_api_token: "cn2oEwlO2atkexV3AwlNYroVwk5IWAJxJ4umultx"
+
+    # Source environment (required via -e)
+    project: ""
+    env_name: ""
+    template_name: ""
+
+    # Template path
+    template_path: "{{ playbook_dir }}/../../../templates"
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: Validate inputs
+    # =========================================================================
+    - name: "Validate required parameters"
+      ansible.builtin.fail:
+        msg: "Required: -e project=xxx -e env_name=yyy -e template_name=zzz"
+      when: project == "" or env_name == "" or template_name == ""
+
+    # =========================================================================
+    # PHASE 2: Fetch source environment
+    # =========================================================================
+    - name: "Get all projects"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_projects
+
+    - name: "Find source project"
+      ansible.builtin.set_fact:
+        source_project: "{{ all_projects.json | selectattr('name', 'equalto', project) | first | default(none) }}"
+
+    - name: "Fail if project not found"
+      ansible.builtin.fail:
+        msg: "Project '{{ project }}' not found"
+      when: source_project is none
+
+    - name: "Get project details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ source_project.uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: project_details
+
+    - name: "Find source environment"
+      ansible.builtin.set_fact:
+        source_env: "{{ project_details.json.environments | selectattr('name', 'equalto', env_name) | first | default(none) }}"
+
+    - name: "Fail if environment not found"
+      ansible.builtin.fail:
+        msg: "Environment '{{ env_name }}' not found in project '{{ project }}'"
+      when: source_env is none
+
+    # =========================================================================
+    # PHASE 3: Fetch services and env vars
+    # =========================================================================
+    - name: "Get all services"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_services
+
+    - name: "Filter services for source environment"
+      ansible.builtin.set_fact:
+        source_services: "{{ all_services.json | selectattr('environment_id', 'equalto', source_env.id) | list }}"
+
+    - name: "Fail if no services found"
+      ansible.builtin.fail:
+        msg: "No services found in {{ project }}/{{ env_name }}"
+      when: source_services | length == 0
+
+    - name: "Display discovered services"
+      ansible.builtin.debug:
+        msg: |
+          Found {{ source_services | length }} services:
+          {% for svc in source_services %}
+            - {{ svc.service_type }} ({{ svc.name }})
+          {% endfor %}
+
+    - name: "Get environment variables for each service"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ item.uuid }}/envs"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 404]
+      loop: "{{ source_services }}"
+      loop_control:
+        label: "{{ item.service_type }}"
+      register: service_envs
+
+    # =========================================================================
+    # PHASE 4: Create sanitized template
+    # =========================================================================
+    - name: "Build service templates"
+      ansible.builtin.set_fact:
+        service_templates: >-
+          {{
+            source_services | map('combine', {
+              'uuid': omit,
+              'id': omit,
+              'environment_id': omit,
+              'server_id': omit,
+              'destination_id': omit,
+              'created_at': omit,
+              'updated_at': omit,
+              'deleted_at': omit,
+              'config_hash': omit,
+              'server': omit,
+              'server_status': omit,
+              'status': omit,
+              'applications': omit,
+              'databases': omit
+            }) | list
+          }}
+
+    - name: "Build sanitized service list"
+      ansible.builtin.set_fact:
+        sanitized_services: |
+          {% set result = [] %}
+          {% for svc in source_services %}
+          {% set _ = result.append({
+            'service_type': svc.service_type,
+            'name_suffix': svc.name | regex_replace('^.*-([a-z0-9]+)$', '\\1'),
+            'description': svc.description | default(''),
+            'connect_to_docker_network': svc.connect_to_docker_network | default(false),
+            'docker_compose_raw': svc.docker_compose_raw | default(omit)
+          }) %}
+          {% endfor %}
+          {{ result }}
+
+    - name: "Build env var templates (excluding Coolify-managed)"
+      ansible.builtin.set_fact:
+        env_templates: >-
+          {{
+            dict(
+              service_envs.results
+              | selectattr('status', 'equalto', 200)
+              | map(attribute='item.service_type')
+              | zip(
+                  service_envs.results
+                  | selectattr('status', 'equalto', 200)
+                  | map(attribute='json')
+                  | map('rejectattr', 'is_coolify', 'equalto', true)
+                  | map('list')
+              )
+            )
+          }}
+
+    # =========================================================================
+    # PHASE 5: Save template files
+    # =========================================================================
+    - name: "Create template directory"
+      ansible.builtin.file:
+        path: "{{ template_path }}/{{ template_name }}"
+        state: directory
+        mode: '0755'
+
+    - name: "Create envs subdirectory"
+      ansible.builtin.file:
+        path: "{{ template_path }}/{{ template_name }}/envs"
+        state: directory
+        mode: '0755'
+
+    - name: "Save template metadata"
+      ansible.builtin.copy:
+        content: |
+          # Template: {{ template_name }}
+          # Created from: {{ project }}/{{ env_name }}
+          # Date: {{ lookup('pipe', 'date -Iseconds') }}
+          
+          name: {{ template_name }}
+          source_project: {{ project }}
+          source_environment: {{ env_name }}
+          service_count: {{ source_services | length }}
+          services:
+          {% for svc in source_services %}
+            - {{ svc.service_type }}
+          {% endfor %}
+        dest: "{{ template_path }}/{{ template_name }}/template.yml"
+        mode: '0644'
+
+    - name: "Save service definitions"
+      ansible.builtin.copy:
+        content: |
+          # Service definitions for template: {{ template_name }}
+          # Apply with: ansible-playbook playbooks/coolify/template/apply.yml \
+          #   -e template_name={{ template_name }} -e project=xxx -e env_name=yyy
+          
+          services:
+          {% for svc in source_services %}
+            - service_type: {{ svc.service_type }}
+              description: "{{ svc.description | default('') }}"
+              connect_to_docker_network: {{ svc.connect_to_docker_network | default(false) | lower }}
+          {% if svc.docker_compose_raw is defined and svc.docker_compose_raw %}
+              docker_compose_raw: |
+          {{ svc.docker_compose_raw | indent(8, first=true) }}
+          {% endif %}
+          {% endfor %}
+        dest: "{{ template_path }}/{{ template_name }}/services.yml"
+        mode: '0644'
+
+    - name: "Save environment variables for each service"
+      ansible.builtin.copy:
+        content: |
+          # Environment variables for {{ item.key }}
+          # User-configurable values (Coolify-managed vars excluded)
+          
+          {% for env in item.value %}
+          {{ env.key }}: "{{ env.value | default('') }}"
+          {% endfor %}
+        dest: "{{ template_path }}/{{ template_name }}/envs/{{ item.key }}.yml"
+        mode: '0600'
+      loop: "{{ env_templates | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: item.value | length > 0
+
+    # =========================================================================
+    # PHASE 6: Summary
+    # =========================================================================
+    - name: "Template saved"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════╗
+          ║                     TEMPLATE SAVED                               ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          ║                                                                  ║
+          ║  Template: {{ template_name }}
+          ║  Source: {{ project }}/{{ env_name }}
+          ║  Location: templates/{{ template_name }}/
+          ║                                                                  ║
+          ║  Contents:                                                       ║
+          ║    - template.yml     (metadata)                                 ║
+          ║    - services.yml     ({{ source_services | length }} services)
+          ║    - envs/            ({{ env_templates | dict2items | selectattr('value') | list | length }} env files)
+          ║                                                                  ║
+          ║  Apply with:                                                     ║
+          ║    ansible-playbook playbooks/coolify/template/apply.yml \       ║
+          ║      -e template_name={{ template_name }} \
+          ║      -e project=TARGET_PROJECT \                                 ║
+          ║      -e env_name=TARGET_ENV                                      ║
+          ║                                                                  ║
+          ╚══════════════════════════════════════════════════════════════════╝

@@ -13,3 +13,4 @@ ansible-cloudns-master/
 **/docker-dev-logs/
 **/docker-test-logs/
 __pycache__/
+templates/

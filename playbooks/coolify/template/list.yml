@@ -1,0 +1,66 @@
+---
+# List Available Templates
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/template/list.yml
+
+- name: List Available Templates
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    template_path: "{{ playbook_dir }}/../../../templates"
+
+  tasks:
+    - name: "Check if templates directory exists"
+      ansible.builtin.stat:
+        path: "{{ template_path }}"
+      register: templates_dir
+
+    - name: "No templates directory"
+      ansible.builtin.debug:
+        msg: "No templates directory found. Save a template first with template/save.yml"
+      when: not templates_dir.stat.exists
+
+    - name: "Find template directories"
+      ansible.builtin.find:
+        paths: "{{ template_path }}"
+        file_type: directory
+        recurse: false
+      register: template_dirs
+      when: templates_dir.stat.exists
+
+    - name: "Load template metadata"
+      ansible.builtin.slurp:
+        src: "{{ item.path }}/template.yml"
+      loop: "{{ template_dirs.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      register: template_metas
+      ignore_errors: true
+      when: templates_dir.stat.exists
+
+    - name: "Display templates"
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════════╗
+          ║                    AVAILABLE TEMPLATES                           ║
+          ╠══════════════════════════════════════════════════════════════════╣
+          {% if template_dirs.files | default([]) | length == 0 %}
+          ║                                                                  ║
+          ║  No templates found.                                             ║
+          ║  Create one with: template/save.yml                              ║
+          ║                                                                  ║
+          {% else %}
+          {% for meta in template_metas.results | default([]) %}
+          {% if meta.content is defined %}
+          ║                                                                  ║
+          ║  {{ meta.item.path | basename }}
+          ║    Source: {{ (meta.content | b64decode | from_yaml).source_project }}/{{ (meta.content | b64decode | from_yaml).source_environment }}
+          ║    Services: {{ (meta.content | b64decode | from_yaml).service_count }}
+          {% endif %}
+          {% endfor %}
+          {% endif %}
+          ║                                                                  ║
+          ╚══════════════════════════════════════════════════════════════════╝
+      when: templates_dir.stat.exists

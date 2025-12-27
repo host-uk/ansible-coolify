@@ -1,0 +1,47 @@
+---
+# Apply environment variables from template to a service
+# Called from apply.yml with env_file variable
+
+- name: "Load env file content"
+  ansible.builtin.slurp:
+    src: "{{ env_file.path }}"
+  register: env_content
+
+- name: "Parse env variables"
+  ansible.builtin.set_fact:
+    env_vars: "{{ env_content.content | b64decode | from_yaml }}"
+    service_type: "{{ env_file.path | basename | regex_replace('\\.yml$', '') }}"
+
+- name: "Get service UUID"
+  ansible.builtin.set_fact:
+    target_service_uuid: "{{ service_uuid_map[service_type] }}"
+
+- name: "Display env apply info"
+  ansible.builtin.debug:
+    msg: "Applying {{ env_vars | dict2items | length }} env vars to {{ service_type }} ({{ target_service_uuid }})"
+
+- name: "Apply each environment variable"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ target_service_uuid }}/envs"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      key: "{{ item.key }}"
+      value: "{{ item.value | default('') }}"
+    status_code: [200, 201, 409, 422]
+  loop: "{{ env_vars | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: env_var_results
+  ignore_errors: true
+
+- name: "Count successful applies"
+  ansible.builtin.set_fact:
+    successful_applies: "{{ env_var_results.results | selectattr('status', 'defined') | list | length }}"
+
+- name: "Display env var apply results"
+  ansible.builtin.debug:
+    msg: "Applied {{ successful_applies }} of {{ env_vars | dict2items | length }} env vars"
