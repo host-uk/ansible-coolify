@@ -366,7 +366,7 @@ Example error handling:
 
 ## API Reference
 
-These modules are built against the Coolify API v1. Full API documentation is available in `doc/apis/coolify-openapi.yaml`.
+These modules are built against the Coolify API v1. Full API documentation is available in `docs/apis/coolify-openapi.yaml`.
 
 Key endpoints used:
 

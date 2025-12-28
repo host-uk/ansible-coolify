@@ -20,7 +20,7 @@ This project provides a comprehensive Ansible-based automation suite for install
         - `coolify/service/`: Service-specific tasks.
     - `roles/`: Reusable logic for system hardening and Coolify management.
     - `state/`: (Ignored by git) Local store for host-specific state and backups.
-- `doc/`: Project documentation.
+- `docs/`: Project documentation.
 - `Makefile`: Entry point for common operations.
 - `inventory.example`: Template for the server inventory.
 
