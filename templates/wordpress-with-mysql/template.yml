@@ -1,0 +1,9 @@
+# Template: wordpress-with-mysql
+# Auto-generated from service test
+# Date: 2025-12-29T07:50:43+00:00
+
+name: wordpress-with-mysql
+service_type: wordpress-with-mysql
+source: automated-test
+tested: true
+test_date: 2025-12-29T07:50:43+00:00

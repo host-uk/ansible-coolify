@@ -1,0 +1,5 @@
+# Environment variables for homepage
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+HOMEPAGE_VAR_BASE: "${SERVICE_URL_HOMEPAGE}"

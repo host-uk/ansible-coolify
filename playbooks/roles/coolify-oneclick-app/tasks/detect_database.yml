@@ -1,0 +1,67 @@
+---
+# Detect database requirements for a one-click service
+#
+# Sets facts:
+#   oneclick_requires_postgresql: boolean
+#   oneclick_requires_mariadb: boolean
+#   oneclick_requires_redis: boolean
+#   oneclick_database_type: postgresql|mariadb|none
+
+- name: Load database mappings
+  ansible.builtin.include_vars:
+    file: database_mappings.yml
+
+- name: Normalize service type
+  ansible.builtin.set_fact:
+    oneclick_service_normalized: "{{ oneclick_service_type | lower | regex_replace('[^a-z0-9-]', '-') }}"
+
+- name: Detect PostgreSQL requirement
+  ansible.builtin.set_fact:
+    oneclick_requires_postgresql: "{{ oneclick_service_normalized in postgresql_services }}"
+
+- name: Detect MariaDB requirement
+  ansible.builtin.set_fact:
+    oneclick_requires_mariadb: "{{ oneclick_service_normalized in mariadb_services }}"
+
+- name: Detect Redis requirement
+  ansible.builtin.set_fact:
+    oneclick_requires_redis: "{{ oneclick_service_normalized in redis_required_services }}"
+
+- name: Detect standalone service
+  ansible.builtin.set_fact:
+    oneclick_is_standalone: "{{ oneclick_service_normalized in standalone_services }}"
+
+- name: Determine database type
+  ansible.builtin.set_fact:
+    oneclick_database_type: >-
+      {{
+        'postgresql' if oneclick_requires_postgresql else
+        ('mariadb' if oneclick_requires_mariadb else 'none')
+      }}
+
+- name: Get service-specific env var overrides
+  ansible.builtin.set_fact:
+    oneclick_env_overrides: "{{ service_env_overrides[oneclick_service_normalized] | default({}) }}"
+
+- name: Display detection results
+  ansible.builtin.debug:
+    msg: |
+      Database Detection Results for {{ oneclick_service_type }}:
+        Normalized Type: {{ oneclick_service_normalized }}
+        Database Type: {{ oneclick_database_type }}
+        Requires PostgreSQL: {{ oneclick_requires_postgresql }}
+        Requires MariaDB: {{ oneclick_requires_mariadb }}
+        Requires Redis: {{ oneclick_requires_redis }}
+        Is Standalone: {{ oneclick_is_standalone }}
+        Has Env Overrides: {{ oneclick_env_overrides | length > 0 }}
+
+- name: Warn if unknown service type
+  ansible.builtin.debug:
+    msg: |
+      WARNING: Service type '{{ oneclick_service_normalized }}' not found in database mappings.
+      The service will be deployed without database configuration.
+      If this service requires a database, please add it to vars/database_mappings.yml
+  when:
+    - not oneclick_requires_postgresql
+    - not oneclick_requires_mariadb
+    - not oneclick_is_standalone

@@ -1,0 +1,9 @@
+# Template: grafana
+# Auto-generated from service test
+# Date: 2025-12-29T08:24:45+00:00
+
+name: grafana
+service_type: grafana
+source: automated-test
+tested: true
+test_date: 2025-12-29T08:24:45+00:00

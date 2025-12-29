@@ -1,0 +1,202 @@
+---
+# Restore Galera Cluster from Backup
+#
+# Restores a backup to the Galera cluster.
+# This requires stopping the cluster, restoring to one node,
+# then restarting with the restored data.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/restore.yml \
+#     -e backup_file=galera_backup_20240101T120000.sql.gz
+#
+# Options:
+#   backup_file: Backup filename in state/galera/backups/
+#   restore_node: Node to restore to (default: first master)
+#   confirm_restore: Set to true to actually restore (safety check)
+
+- name: Restore Galera Cluster from Backup
+  hosts: controller
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Validate backup_file is specified
+      ansible.builtin.assert:
+        that:
+          - backup_file is defined
+        fail_msg: |
+          You must specify a backup file:
+            -e backup_file=<filename>
+
+          Available backups:
+          {{ lookup('fileglob', galera_backup_dir ~ '/galera_backup_*.sql.gz') | default('none') }}
+
+  tasks:
+    - name: Include Galera role defaults
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: main.yml
+
+    - name: Check backup file exists
+      ansible.builtin.stat:
+        path: "{{ galera_backup_dir }}/{{ backup_file }}"
+      register: backup_stat
+      delegate_to: localhost
+
+    - name: Fail if backup not found
+      ansible.builtin.fail:
+        msg: "Backup file not found: {{ galera_backup_dir }}/{{ backup_file }}"
+      when: not backup_stat.stat.exists
+
+    - name: Load backup metadata
+      ansible.builtin.slurp:
+        src: "{{ galera_backup_dir }}/{{ backup_file }}.meta"
+      register: backup_meta_raw
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: Parse backup metadata
+      ansible.builtin.set_fact:
+        backup_meta: "{{ backup_meta_raw.content | b64decode | from_yaml }}"
+      when: backup_meta_raw is succeeded
+
+    - name: Select restore node
+      ansible.builtin.set_fact:
+        galera_restore_node: >-
+          {{
+            restore_node | default(
+              (galera_nodes | selectattr('role', 'equalto', 'master') | first | default(galera_nodes[0])).host
+            )
+          }}
+
+    - name: Find node configuration
+      ansible.builtin.set_fact:
+        galera_restore_node_config: >-
+          {{ galera_nodes | selectattr('host', 'equalto', galera_restore_node) | first | default({}) }}
+
+    - name: Display restore warning
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║              ⚠️  GALERA RESTORE WARNING                      ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  This will:                                                  ║
+          ║  1. Stop all Galera nodes                                    ║
+          ║  2. Restore backup to {{ galera_restore_node_config.name }}
+          ║  3. Bootstrap cluster from restored data                     ║
+          ║  4. Rejoin all other nodes                                   ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  Backup: {{ backup_file }}
+          ║  Size: {{ (backup_stat.stat.size / 1024 / 1024) | round(2) }} MB
+          ║  Created: {{ backup_meta.timestamp | default('unknown') }}
+          ║  Source: {{ backup_meta.source_node | default('unknown') }}
+          ╚══════════════════════════════════════════════════════════════╝
+
+    - name: Confirm restore
+      ansible.builtin.fail:
+        msg: |
+          To proceed with restore, add: -e confirm_restore=true
+
+          THIS WILL OVERWRITE ALL CURRENT DATA!
+      when: not confirm_restore | default(false) | bool
+
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Get all Galera services
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: galera_all_services
+
+    - name: Stop all Galera services
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ item.uuid }}/stop"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 202]
+      loop: >-
+        {{ galera_all_services.json | selectattr('name', 'in', galera_nodes | map(attribute='name') | list) | list }}
+      loop_control:
+        label: "{{ item.name }}"
+      ignore_errors: true
+
+    - name: Wait for services to stop
+      ansible.builtin.pause:
+        seconds: 30
+        prompt: "Waiting for services to stop..."
+
+    - name: Copy backup to restore node
+      ansible.builtin.copy:
+        src: "{{ galera_backup_dir }}/{{ backup_file }}"
+        dest: "/tmp/{{ backup_file }}"
+        mode: '0600'
+      delegate_to: "{{ galera_restore_node }}"
+
+    - name: Start restore node service only
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ (galera_all_services.json | selectattr('name', 'equalto', galera_restore_node_config.name) | first).uuid }}/start"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 202]
+
+    - name: Wait for MariaDB to be ready
+      ansible.builtin.pause:
+        seconds: 60
+        prompt: "Waiting for MariaDB to start..."
+
+    - name: Restore backup to database
+      ansible.builtin.shell: |
+        gunzip -c /tmp/{{ backup_file }} | \
+        docker exec -i galera-{{ galera_restore_node_config.name }} \
+          mariadb -u root -p{{ galera_root_password }}
+      delegate_to: "{{ galera_restore_node }}"
+      register: restore_result
+
+    - name: Remove backup file from restore node
+      ansible.builtin.file:
+        path: "/tmp/{{ backup_file }}"
+        state: absent
+      delegate_to: "{{ galera_restore_node }}"
+
+    - name: Restart all nodes to sync
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ item.uuid }}/restart"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 202]
+      loop: >-
+        {{ galera_all_services.json | selectattr('name', 'in', galera_nodes | map(attribute='name') | list) | list }}
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Wait for cluster to sync
+      ansible.builtin.pause:
+        seconds: 120
+        prompt: "Waiting for cluster to synchronize..."
+
+    - name: Verify cluster health
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: health_check.yml
+      vars:
+        galera_health_check_strict: false
+
+    - name: Display restore result
+      ansible.builtin.debug:
+        msg: |
+          ✓ Restore complete!
+
+          Cluster status: {{ galera_cluster_healthy | default('unknown') }}
+          Running nodes: {{ galera_running_count | default('?') }}/{{ galera_nodes | length }}
+
+          Restored from: {{ backup_file }}
+          To: {{ galera_restore_node_config.name }}

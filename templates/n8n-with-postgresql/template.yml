@@ -1,0 +1,9 @@
+# Template: n8n-with-postgresql
+# Auto-generated from service test
+# Date: 2025-12-29T08:31:42+00:00
+
+name: n8n-with-postgresql
+service_type: n8n-with-postgresql
+source: automated-test
+tested: true
+test_date: 2025-12-29T08:31:42+00:00

@@ -1,0 +1,32 @@
+# Service definition for: grocy
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=grocy -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: grocy
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          grocy:
+            image: 'lscr.io/linuxserver/grocy:latest'
+            environment:
+              - SERVICE_URL_GROCY
+              - PUID=1000
+              - PGID=1000
+              - TZ=Europe/Madrid
+            volumes:
+              - 'grocy-config:/config'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:80'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

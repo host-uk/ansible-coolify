@@ -23,10 +23,8 @@
       failed_when: make_check.rc != 0
 
     - name: "SETUP: Verify Docker is available"
-      ansible.builtin.command: docker info
+      community.docker.docker_host_info:
       register: docker_info
-      changed_when: false
-      failed_when: docker_info.rc != 0
 
     - name: "SETUP: Clean any existing docker-dev environment"
       ansible.builtin.command:

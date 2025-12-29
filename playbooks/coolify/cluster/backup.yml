@@ -1,0 +1,132 @@
+---
+# Backup All Shared Infrastructure Clusters
+#
+# This playbook creates backups of all deployed clusters:
+# - MariaDB Galera Cluster (mysqldump)
+# - Redis Sentinel Cluster (RDB snapshot)
+# - PostgreSQL Patroni Cluster (pg_dump)
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/cluster/backup.yml
+
+- name: Backup All Shared Infrastructure Clusters
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display backup start
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SHARED INFRASTRUCTURE CLUSTER BACKUP
+          ====================================================================
+            Creating backups of all deployed clusters...
+
+            Backup locations:
+              - Galera: state/galera/backups/
+              - Redis: state/redis/backups/
+              - PostgreSQL: state/postgresql/backups/
+          ====================================================================
+
+    - name: Set backup timestamp
+      ansible.builtin.set_fact:
+        backup_timestamp: "{{ ansible_date_time.date }}-{{ ansible_date_time.epoch }}"
+
+  tasks:
+    # ==========================================================================
+    # Setup Coolify API Access
+    # ==========================================================================
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    # ==========================================================================
+    # Backup Galera Cluster
+    # ==========================================================================
+    - name: "GALERA: Backup MariaDB Galera Cluster"
+      block:
+        - name: Include Galera role
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: backup.yml
+
+        - name: Store Galera backup status
+          ansible.builtin.set_fact:
+            backup_galera_status: "SUCCESS"
+      rescue:
+        - name: Mark Galera backup as failed
+          ansible.builtin.set_fact:
+            backup_galera_status: "FAILED"
+
+    # ==========================================================================
+    # Backup Redis Sentinel Cluster
+    # ==========================================================================
+    - name: "REDIS: Backup Redis Sentinel Cluster"
+      block:
+        - name: Include Redis Sentinel backup
+          ansible.builtin.import_playbook: ../redis/backup.yml
+
+        - name: Store Redis backup status
+          ansible.builtin.set_fact:
+            backup_redis_status: "SUCCESS"
+      rescue:
+        - name: Mark Redis backup as failed
+          ansible.builtin.set_fact:
+            backup_redis_status: "FAILED"
+      ignore_errors: true
+
+    # ==========================================================================
+    # Backup PostgreSQL Patroni Cluster
+    # ==========================================================================
+    - name: "POSTGRESQL: Backup PostgreSQL Patroni Cluster"
+      block:
+        - name: Include PostgreSQL Patroni backup
+          ansible.builtin.import_playbook: ../postgresql/backup.yml
+
+        - name: Store PostgreSQL backup status
+          ansible.builtin.set_fact:
+            backup_postgresql_status: "SUCCESS"
+      rescue:
+        - name: Mark PostgreSQL backup as failed
+          ansible.builtin.set_fact:
+            backup_postgresql_status: "FAILED"
+      ignore_errors: true
+
+  # ============================================================================
+  # Post Tasks: Display Summary
+  # ============================================================================
+  post_tasks:
+    - name: List backup files
+      ansible.builtin.find:
+        paths:
+          - state/galera/backups
+          - state/redis/backups
+          - state/postgresql/backups
+        patterns: "*{{ backup_timestamp }}*"
+      register: backup_files
+      delegate_to: localhost
+
+    - name: Display backup summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SHARED INFRASTRUCTURE BACKUP COMPLETE
+          ====================================================================
+            Backup Timestamp: {{ backup_timestamp }}
+
+            Galera Backup: {{ backup_galera_status | default('SKIPPED') }}
+            Redis Backup: {{ backup_redis_status | default('SKIPPED') }}
+            PostgreSQL Backup: {{ backup_postgresql_status | default('SKIPPED') }}
+
+            Backup Files Created: {{ backup_files.files | length }}
+          {% for file in backup_files.files %}
+              - {{ file.path | basename }}
+          {% endfor %}
+
+            Backup Locations:
+              - state/galera/backups/
+              - state/redis/backups/
+              - state/postgresql/backups/
+          ====================================================================

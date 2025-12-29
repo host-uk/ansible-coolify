@@ -1,0 +1,11 @@
+# Environment variables for vaultwarden
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+ADMIN_TOKEN: "${SERVICE_PASSWORD_64_ADMIN}"
+DOMAIN: "${SERVICE_URL_VAULTWARDEN}"
+PUSH_ENABLED: "false"
+PUSH_SERVICE_ID: ""
+PUSH_SERVICE_KEY: ""
+SIGNUP_ALLOWED: "true"
+VAULTWARDEN_DB_URL: "data/db.sqlite3"

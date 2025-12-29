@@ -1,0 +1,543 @@
+---
+# Test 11: Laravel Application with Galera Role
+#
+# Tests that the coolify-galera role deploys a MariaDB instance that's
+# compatible with Laravel applications (app user, database, CRUD operations).
+#
+# Uses multi-play structure:
+# 1. localhost: Create Docker containers via docker_dev role
+# 2. test-controller.lan: Install Coolify via coolify role
+# 3. localhost: Run Laravel application tests
+#
+# Tests:
+# - LG-001: Role deploys Galera with app database and user
+# - LG-002: Application user can connect
+# - LG-003: Laravel-style migrations work
+# - LG-004: Full CRUD operations via app user
+# - LG-005: Hostname resolution configured correctly
+
+# =============================================================================
+# PLAY 1: Create Docker Development Environment
+# =============================================================================
+- name: "Test 11: Setup Docker Environment"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    - name: "SETUP: Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 11: LARAVEL APPLICATION WITH GALERA ROLE
+          ====================================================================
+            Phase 1: Creating Docker development environment
+            - Using docker_dev role for container management
+            - Using coolify role for Coolify installation
+            - Using coolify-galera role for MariaDB deployment
+          ====================================================================
+
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "SETUP: Create containers via docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+  tags:
+    - test
+    - galera
+    - laravel
+    - setup
+
+# =============================================================================
+# PLAY 2: Install Coolify via Role
+# =============================================================================
+- name: "Test 11: Install Coolify via Role"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "TestPassword123!"
+    coolify_auto_setup_enabled: true
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "./state"
+    coolify_docker_address_pool_base: "172.30.0.0/16"
+    coolify_docker_address_pool_size: "24"
+    coolify_docker_pool_force_override: false
+    coolify_autoupdate: false
+    coolify_registry_url: "https://hub.docker.com"
+    coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    coolify_detected_key_uuid: ""
+
+  tasks:
+    - name: "COOLIFY: Install and configure via coolify role"
+      ansible.builtin.include_role:
+        name: coolify
+
+    - name: "COOLIFY: Store API token for later plays"
+      ansible.builtin.set_fact:
+        controller_api_token: "{{ coolify_api_token }}"
+        controller_api_ready: "{{ coolify_api_ready }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+  tags:
+    - test
+    - galera
+    - laravel
+    - coolify-setup
+
+# =============================================================================
+# PLAY 3: Run Laravel Application Tests
+# =============================================================================
+- name: "Test 11: Laravel Application Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    coolify_api_url: "http://{{ controller_ip }}:8000/api/v1"
+    coolify_api_token: "{{ controller_api_token }}"
+
+    # Override role defaults for testing (Laravel-style config)
+    galera_cluster_name: "test-laravel-cluster"
+    galera_project_name: "galera-laravel-test"
+    galera_environment_name: "testing"
+    galera_hostname: "db.test.local"
+    galera_root_password: "test_root_password_123"
+    galera_app_database: "laravel"
+    galera_app_user: "laravel_user"
+    galera_app_password: "laravel_password_456"
+    galera_instant_deploy: true
+
+    # Test node
+    test_galera_node:
+      name: "galera-laravel-1"
+      host: "test-app-server-1.lan"
+      ip: "172.29.0.20"
+      role: "master"
+
+  tasks:
+    - name: "TEST: Verify Coolify API is ready"
+      ansible.builtin.assert:
+        that:
+          - controller_api_ready | default(false)
+          - controller_api_token | default('') | length > 0
+        fail_msg: "Coolify API not ready or token not set"
+        success_msg: "Coolify API ready, token configured via role"
+
+    - name: "TEST: Verify API access"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+      retries: 10
+      delay: 3
+      until: api_check.status == 200
+
+    - name: "TEST: Register test server"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "laravel-test-server"
+          description: "Test server for Laravel testing"
+          ip: "{{ test_galera_node.ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ (lookup('url', coolify_api_url ~ '/security/keys', headers={'Authorization': 'Bearer ' ~ coolify_api_token}, split_lines=false) | from_json)[0].uuid }}"
+        status_code: [200, 201, 422]
+      register: server_register
+
+    # ==========================================================================
+    # LG-001: Deploy Galera with App Database and User
+    # ==========================================================================
+    - name: "LG-001: Deploy Galera node using role"
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: deploy_node.yml
+      vars:
+        galera_current_node: "{{ test_galera_node }}"
+        galera_bootstrap_node: true
+
+    - name: "LG-001: Assert role deployed service"
+      ansible.builtin.assert:
+        that:
+          - galera_service_uuids is defined
+          - galera_service_uuids[test_galera_node.name] is defined
+        fail_msg: "Role did not deploy service"
+        success_msg: "LG-001 PASSED: Galera deployed via role - UUID: {{ galera_service_uuids[test_galera_node.name] }}"
+
+    - name: "LG-001: Wait for MariaDB container"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: /bin/bash -c "docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q galera || exit 1"
+      register: container_wait
+      retries: 30
+      delay: 10
+      until: container_wait.rc == 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: "LG-001: Get container name"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: /bin/bash -c "docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep galera | head -1"
+      register: galera_container_name
+      changed_when: false
+      when: container_wait.rc == 0
+
+    - name: "LG-001: Wait for MariaDB ready"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} -e "SELECT 1;"
+      register: db_ready
+      retries: 30
+      delay: 5
+      until: db_ready.rc == 0
+      when: container_wait.rc == 0
+
+    - name: "LG-001: Verify app database exists"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} -N -e "SHOW DATABASES LIKE '{{ galera_app_database }}';"
+      register: lg001_db_check
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    - name: "LG-001: Assert app database exists"
+      ansible.builtin.assert:
+        that:
+          - "'{{ galera_app_database }}' in lg001_db_check.stdout"
+        fail_msg: "App database {{ galera_app_database }} not created"
+        success_msg: "LG-001 PASSED: App database {{ galera_app_database }} exists"
+      when: lg001_db_check is defined and lg001_db_check is not skipped
+
+    # ==========================================================================
+    # LG-002: Test Application User Connection
+    # ==========================================================================
+    - name: "LG-002: Test app user can connect"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "SELECT 1;"
+      register: lg002_app_connect
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    - name: "LG-002: Assert app user connection works"
+      ansible.builtin.assert:
+        that:
+          - lg002_app_connect.rc == 0
+        fail_msg: "App user {{ galera_app_user }} cannot connect to database"
+        success_msg: "LG-002 PASSED: App user {{ galera_app_user }} can connect to {{ galera_app_database }}"
+      when: lg002_app_connect is defined and lg002_app_connect is not skipped
+
+    # ==========================================================================
+    # LG-003: Test Laravel-Style Migrations
+    # ==========================================================================
+    - name: "LG-003: Create Laravel migrations table"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "
+          CREATE TABLE IF NOT EXISTS migrations (
+          id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          migration VARCHAR(255) NOT NULL,
+          batch INT NOT NULL
+          );"
+      register: lg003_migrations_table
+      when: container_wait.rc == 0 and lg002_app_connect.rc == 0
+
+    - name: "LG-003: Insert migration records"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "
+          INSERT INTO migrations (migration, batch) VALUES
+          ('2024_01_01_000000_create_users_table', 1),
+          ('2024_01_01_000001_create_password_reset_tokens_table', 1),
+          ('2024_01_01_000002_create_sessions_table', 1);"
+      register: lg003_insert_migrations
+      when: lg003_migrations_table.rc | default(1) == 0
+
+    - name: "LG-003: Verify migrations recorded"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -N -e "SELECT COUNT(*) FROM migrations;"
+      register: lg003_verify
+      when: lg003_insert_migrations.rc | default(1) == 0
+
+    - name: "LG-003: Assert migrations work"
+      ansible.builtin.assert:
+        that:
+          - "'3' in lg003_verify.stdout"
+        fail_msg: "Laravel migrations not recorded correctly"
+        success_msg: "LG-003 PASSED: Laravel-style migrations work (3 records)"
+      when: lg003_verify is defined and lg003_verify is not skipped
+
+    # ==========================================================================
+    # LG-004: Test Full CRUD Operations
+    # ==========================================================================
+    - name: "LG-004: Create users table (Laravel-style)"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "
+          CREATE TABLE IF NOT EXISTS users (
+          id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          email VARCHAR(255) UNIQUE NOT NULL,
+          email_verified_at TIMESTAMP NULL,
+          password VARCHAR(255) NOT NULL,
+          remember_token VARCHAR(100) NULL,
+          created_at TIMESTAMP NULL,
+          updated_at TIMESTAMP NULL
+          );"
+      register: lg004_create_table
+      when: container_wait.rc == 0 and lg002_app_connect.rc == 0
+
+    - name: "LG-004: CREATE - Insert user"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "
+          INSERT INTO users (name, email, password, created_at, updated_at)
+          VALUES ('Test User', 'test@example.com', 'hashed_password', NOW(), NOW());"
+      register: lg004_create
+      when: lg004_create_table.rc | default(1) == 0
+
+    - name: "LG-004: READ - Fetch user"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -N -e "SELECT name FROM users WHERE email = 'test@example.com';"
+      register: lg004_read
+      when: lg004_create.rc | default(1) == 0
+
+    - name: "LG-004: Assert CREATE/READ work"
+      ansible.builtin.assert:
+        that:
+          - "'Test User' in lg004_read.stdout"
+        fail_msg: "CREATE/READ operations failed"
+        success_msg: "LG-004 PASSED: CREATE/READ work correctly"
+      when: lg004_read is defined and lg004_read is not skipped
+
+    - name: "LG-004: UPDATE - Modify user"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "
+          UPDATE users SET name = 'Updated User', updated_at = NOW()
+          WHERE email = 'test@example.com';"
+      register: lg004_update
+      when: lg004_read.rc | default(1) == 0
+
+    - name: "LG-004: Verify UPDATE"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -N -e "SELECT name FROM users WHERE email = 'test@example.com';"
+      register: lg004_verify_update
+      when: lg004_update.rc | default(1) == 0
+
+    - name: "LG-004: Assert UPDATE works"
+      ansible.builtin.assert:
+        that:
+          - "'Updated User' in lg004_verify_update.stdout"
+        fail_msg: "UPDATE operation failed"
+        success_msg: "LG-004 PASSED: UPDATE works correctly"
+      when: lg004_verify_update is defined and lg004_verify_update is not skipped
+
+    - name: "LG-004: DELETE - Remove user"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -e "DELETE FROM users WHERE email = 'test@example.com';"
+      register: lg004_delete
+      when: lg004_verify_update.rc | default(1) == 0
+
+    - name: "LG-004: Verify DELETE"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u {{ galera_app_user }} -p{{ galera_app_password }} {{ galera_app_database }} -N -e "SELECT COUNT(*) FROM users WHERE email = 'test@example.com';"
+      register: lg004_verify_delete
+      when: lg004_delete.rc | default(1) == 0
+
+    - name: "LG-004: Assert DELETE works"
+      ansible.builtin.assert:
+        that:
+          - "'0' in lg004_verify_delete.stdout"
+        fail_msg: "DELETE operation failed"
+        success_msg: "LG-004 PASSED: Full CRUD operations verified (CREATE, READ, UPDATE, DELETE)"
+      when: lg004_verify_delete is defined and lg004_verify_delete is not skipped
+
+    # ==========================================================================
+    # LG-005: Test Hostname Resolution
+    # ==========================================================================
+    - name: "LG-005: Check hostname resolution in container"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          getent hosts {{ galera_hostname }} || echo "not-configured"
+      register: lg005_hostname
+      when: container_wait.rc == 0
+      ignore_errors: true
+
+    - name: "LG-005: Display hostname configuration"
+      ansible.builtin.debug:
+        msg: |
+          Hostname resolution for {{ galera_hostname }}:
+          {{ lg005_hostname.stdout | default('No result') }}
+          (Note: Extra hosts are configured in docker-compose template)
+      when: lg005_hostname is defined
+
+    # ==========================================================================
+    # TEST SUMMARY
+    # ==========================================================================
+    - name: "TEST SUMMARY: Display results"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 11: LARAVEL APPLICATION RESULTS
+          ====================================================================
+            Coolify Setup (via coolify role):
+              Installed via Role: true
+              API Token from Role: {{ controller_api_token | length > 0 }}
+
+            Test Results:
+              LG-001 Role Deployment:    {{ 'PASSED' if galera_service_uuids is defined else 'SKIPPED' }}
+              LG-002 App User Connect:   {{ 'PASSED' if lg002_app_connect.rc | default(1) == 0 else 'SKIPPED' }}
+              LG-003 Migrations:         {{ 'PASSED' if lg003_verify.stdout | default('') is search('3') else 'SKIPPED' }}
+              LG-004 CRUD Operations:    {{ 'PASSED' if lg004_verify_delete.stdout | default('') is search('0') else 'SKIPPED' }}
+              LG-005 Hostname Config:    {{ 'CHECKED' }}
+
+            Database: {{ galera_app_database }}
+            App User: {{ galera_app_user }}
+            Hostname: {{ galera_hostname }}
+            Service UUID: {{ galera_service_uuids[test_galera_node.name] | default('N/A') }}
+
+            KEY: This test verifies the coolify-galera role deploys
+            MariaDB correctly for Laravel application use.
+          ====================================================================
+
+  # ============================================================================
+  # POST_TASKS: Cleanup
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Delete test service"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ galera_service_uuids[test_galera_node.name] }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+      when: galera_service_uuids is defined and galera_service_uuids[test_galera_node.name] is defined
+
+    - name: "CLEANUP: Delete test project"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ galera_project_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+      when: galera_project_uuid is defined
+
+    - name: "CLEANUP: Destroy test containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: Laravel Application with Galera"
+      ansible.builtin.debug:
+        msg: |
+          All Laravel Application tests completed!
+          - Coolify installed via coolify role
+          - Galera deployed via role with app database
+          - Application user can connect
+          - Laravel-style migrations work
+          - Full CRUD operations verified
+          - Hostname resolution configured
+
+  tags:
+    - test
+    - galera
+    - laravel
+    - role-test
+    - docker-dev

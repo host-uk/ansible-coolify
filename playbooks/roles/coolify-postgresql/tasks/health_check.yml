@@ -1,0 +1,123 @@
+---
+# Verify PostgreSQL Patroni cluster health
+# Checks primary, replicas, etcd, and Patroni status
+#
+# Required variables:
+#   postgresql_nodes: List of all cluster nodes
+#   postgresql_superuser_password: PostgreSQL superuser password
+
+- name: "Initialize health check results"
+  ansible.builtin.set_fact:
+    postgresql_health_results: {}
+
+- name: "Get cluster status from Patroni REST API"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ postgresql_primary_node.name }}
+      curl -sf http://localhost:{{ patroni_restapi_port }}/cluster
+  register: patroni_cluster_status
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ postgresql_primary_node.host }}"
+
+- name: "Parse Patroni cluster info"
+  ansible.builtin.set_fact:
+    patroni_cluster_info: "{{ patroni_cluster_status.stdout | from_json }}"
+  when: patroni_cluster_status.rc == 0
+  ignore_errors: true
+
+- name: "Store Patroni results"
+  ansible.builtin.set_fact:
+    postgresql_health_results: >-
+      {{
+        postgresql_health_results | combine({
+          'patroni_reachable': patroni_cluster_status.rc == 0,
+          'patroni_members': patroni_cluster_info.members | default([]) | length
+        })
+      }}
+
+- name: "Get leader from Patroni"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ postgresql_primary_node.name }}
+      curl -sf http://localhost:{{ patroni_restapi_port }}/leader
+  register: patroni_leader
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ postgresql_primary_node.host }}"
+
+- name: "Check etcd cluster health"
+  ansible.builtin.command:
+    cmd: >
+      docker exec etcd-{{ postgresql_primary_node.name }}
+      etcdctl endpoint health --endpoints=http://localhost:{{ etcd_client_port }}
+  register: etcd_health
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ postgresql_primary_node.host }}"
+
+- name: "Check PostgreSQL primary health"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ postgresql_primary_node.name }}
+      psql -U {{ postgresql_superuser }} -c "SELECT pg_is_in_recovery();"
+  register: postgresql_primary_health
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ postgresql_primary_node.host }}"
+  environment:
+    PGPASSWORD: "{{ postgresql_superuser_password }}"
+  no_log: true
+
+- name: "Parse primary health"
+  ansible.builtin.set_fact:
+    postgresql_primary_healthy: "{{ postgresql_primary_health.rc == 0 and 'f' in (postgresql_primary_health.stdout | default('')) }}"
+
+- name: "Get replication status"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ postgresql_primary_node.name }}
+      psql -U {{ postgresql_superuser }} -c "SELECT client_addr, state, sync_state FROM pg_stat_replication;"
+  register: postgresql_replication_status
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ postgresql_primary_node.host }}"
+  environment:
+    PGPASSWORD: "{{ postgresql_superuser_password }}"
+  no_log: true
+
+- name: "Build health summary"
+  ansible.builtin.set_fact:
+    postgresql_health_summary:
+      cluster_name: "{{ postgresql_cluster_name }}"
+      patroni_scope: "{{ postgresql_scope }}"
+      patroni_reachable: "{{ postgresql_health_results.patroni_reachable | default(false) }}"
+      patroni_members: "{{ postgresql_health_results.patroni_members | default(0) }}"
+      etcd_healthy: "{{ etcd_health.rc | default(1) == 0 }}"
+      primary_healthy: "{{ postgresql_primary_healthy | default(false) }}"
+      leader_node: "{{ patroni_leader.stdout | default('unknown') }}"
+      total_nodes: "{{ postgresql_nodes | length }}"
+      expected_replicas: "{{ postgresql_nodes | rejectattr('role', 'equalto', 'primary') | list | length }}"
+
+- name: "Display health check results"
+  ansible.builtin.debug:
+    msg: |
+      PostgreSQL Patroni Cluster Health Check:
+        Cluster: {{ postgresql_health_summary.cluster_name }}
+        Patroni Scope: {{ postgresql_health_summary.patroni_scope }}
+
+        Status:
+          Patroni Reachable: {{ postgresql_health_summary.patroni_reachable }}
+          Patroni Members: {{ postgresql_health_summary.patroni_members }}/{{ postgresql_health_summary.total_nodes }}
+          etcd Healthy: {{ postgresql_health_summary.etcd_healthy }}
+          Primary Healthy: {{ postgresql_health_summary.primary_healthy }}
+          Current Leader: {{ postgresql_health_summary.leader_node }}
+
+        Result: {{ 'HEALTHY' if (postgresql_health_summary.patroni_reachable and postgresql_health_summary.etcd_healthy and postgresql_health_summary.primary_healthy) else 'DEGRADED' }}
+
+- name: "Fail if cluster unhealthy"
+  ansible.builtin.fail:
+    msg: "PostgreSQL Patroni cluster is not healthy. Patroni: {{ postgresql_health_summary.patroni_reachable }}, etcd: {{ postgresql_health_summary.etcd_healthy }}, Primary: {{ postgresql_health_summary.primary_healthy }}"
+  when:
+    - not (postgresql_health_summary.patroni_reachable and postgresql_health_summary.etcd_healthy and postgresql_health_summary.primary_healthy)
+    - postgresql_health_fail_on_error | default(true)

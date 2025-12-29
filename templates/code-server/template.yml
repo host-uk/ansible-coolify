@@ -1,0 +1,9 @@
+# Template: code-server
+# Auto-generated from service test
+# Date: 2025-12-29T03:16:10+00:00
+
+name: code-server
+service_type: code-server
+source: automated-test
+tested: true
+test_date: 2025-12-29T03:16:10+00:00

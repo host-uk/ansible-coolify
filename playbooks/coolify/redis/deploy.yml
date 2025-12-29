@@ -1,0 +1,89 @@
+---
+# Deploy Redis Sentinel Cluster
+#
+# This playbook deploys a full Redis Sentinel cluster via Coolify Services API.
+# It bootstraps the master node, then joins replicas and sentinel nodes.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/redis/deploy.yml
+#
+# Variables (can be overridden with -e):
+#   redis_hostname: Service discovery hostname (default: cache.host.uk.com)
+#   redis_project_name: Coolify project name (default: redis-cluster)
+#   redis_nodes: List of node configurations (see defaults)
+
+- name: Deploy Redis Sentinel Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                         REDIS SENTINEL CLUSTER DEPLOYMENT
+          ====================================================================
+            This will deploy a {{ redis_nodes | default([]) | length }}-node Redis Sentinel cluster via Coolify.
+
+            Service hostname: {{ redis_hostname | default('cache.host.uk.com') }}
+            Redis version: {{ redis_version | default('7.4') }}
+            Sentinel quorum: {{ redis_sentinel_quorum | default(2) }}
+          ====================================================================
+
+  tasks:
+    - name: Ensure Redis state directory exists
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - state/redis
+        - state/redis/backups
+      delegate_to: localhost
+
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Redis Sentinel role defaults
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: main.yml
+
+    - name: Bootstrap master Redis node
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: bootstrap_cluster.yml
+
+    - name: Join replica and sentinel nodes to cluster
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: join_cluster.yml
+
+    - name: Verify cluster health
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: health_check.yml
+      vars:
+        redis_health_fail_on_error: false
+
+    - name: Display connection information
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                         REDIS SENTINEL CLUSTER DEPLOYED
+          ====================================================================
+            Connection Details:
+              Host: {{ redis_hostname }}
+              Port: {{ redis_port }}
+              Sentinel Port: {{ redis_sentinel_port }}
+              Master Name: {{ redis_master_name }}
+              Password: (stored in state/redis/password.txt)
+
+            Cluster Status:
+              Master: {{ redis_master_node.name }} ({{ redis_master_ip }})
+              Replicas: {{ redis_nodes | selectattr('role', 'equalto', 'replica') | list | length }}
+              Sentinels: {{ redis_nodes | length }}
+          ====================================================================

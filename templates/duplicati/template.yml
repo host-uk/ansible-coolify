@@ -1,0 +1,9 @@
+# Template: duplicati
+# Auto-generated from service test
+# Date: 2025-12-29T03:28:11+00:00
+
+name: duplicati
+service_type: duplicati
+source: automated-test
+tested: true
+test_date: 2025-12-29T03:28:11+00:00

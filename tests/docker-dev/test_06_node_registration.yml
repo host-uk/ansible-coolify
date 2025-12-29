@@ -1,138 +1,150 @@
 ---
 # Test 06: Node Registration
 # Tests: SSH key distribution, server registration via API
+#
+# Uses multi-play structure:
+# 1. localhost: Create Docker containers via docker_dev role
+# 2. test-controller.lan: Install Coolify via coolify role
+# 3. localhost: Run node registration tests
 
-- name: "Test 06: Node Registration"
+# =============================================================================
+# PLAY 1: Create Docker Development Environment
+# =============================================================================
+- name: "Test 06: Setup Docker Environment"
   hosts: localhost
   connection: local
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - conftest.yml
   vars:
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
     docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
     docker_dev_network_name: "{{ test_docker_dev_network_name }}"
     docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
     docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
     docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
     docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
-    docker_dev_containers: "{{ test_docker_dev_containers }}"
     docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    - name: "SETUP: Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 06: NODE REGISTRATION
+          ====================================================================
+            Phase 1: Creating Docker development environment
+            - Using docker_dev role for container management
+            - Using coolify role for Coolify installation
+          ====================================================================
+
+    - name: "SETUP: Verify Docker is available"
+      community.docker.docker_host_info:
+      register: docker_info
+      failed_when: docker_info.host_info is not defined
+
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "SETUP: Create containers via docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+  tags:
+    - test
+    - node-registration
+    - setup
+
+# =============================================================================
+# PLAY 2: Install Coolify via Role
+# =============================================================================
+- name: "Test 06: Install Coolify via Role"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "TestPassword123!"
+    coolify_auto_setup_enabled: true
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "./state"
+    coolify_docker_address_pool_base: "172.30.0.0/16"
+    coolify_docker_address_pool_size: "24"
+    coolify_docker_pool_force_override: false
+    coolify_autoupdate: false
+    coolify_registry_url: "https://hub.docker.com"
+    coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    coolify_detected_key_uuid: ""
+
+  tasks:
+    - name: "COOLIFY: Install and configure via coolify role"
+      ansible.builtin.include_role:
+        name: coolify
+
+    - name: "COOLIFY: Store API token for later plays"
+      ansible.builtin.set_fact:
+        controller_api_token: "{{ coolify_api_token }}"
+        controller_api_ready: "{{ coolify_api_ready }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+  tags:
+    - test
+    - node-registration
+    - coolify-setup
+
+# =============================================================================
+# PLAY 3: Run Node Registration Tests
+# =============================================================================
+- name: "Test 06: Node Registration Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
     controller_container: "{{ docker_dev_name_prefix }}-controller"
     controller_ip: "172.29.0.10"
     worker_container: "{{ docker_dev_name_prefix }}-worker"
     worker_ip: "172.29.0.20"
     coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
+    coolify_api_token: "{{ controller_api_token }}"
 
   tasks:
-    # ==========================================================================
-    # SETUP: Create containers and install Coolify with API
-    # ==========================================================================
-    - name: "SETUP: Verify Docker is available"
-      ansible.builtin.command: docker info
-      register: docker_info
-      changed_when: false
-      failed_when: docker_info.rc != 0
+    - name: "TEST: Verify Coolify API is ready"
+      ansible.builtin.assert:
+        that:
+          - controller_api_ready | default(false)
+          - controller_api_token | default('') | length > 0
+        fail_msg: "Coolify API not ready or token not set"
+        success_msg: "Coolify API ready, token configured via role"
 
-    - name: "SETUP: Clean existing environment"
-      ansible.builtin.shell: |
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
-        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
-      changed_when: true
-      ignore_errors: true
-
-    - name: "SETUP: Create containers"
-      ansible.builtin.include_role:
-        name: docker_dev
-
-    - name: "SETUP: Wait for all containers to be healthy"
-      ansible.builtin.command: >
-        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
-      register: health
-      loop: "{{ docker_dev_containers }}"
-      changed_when: false
-      retries: 60
-      delay: 2
-      until: health.stdout == 'healthy'
-
-    - name: "SETUP: Download Coolify install script"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /root/install.sh
-      register: install_download
-      changed_when: true
-      retries: 3
-      delay: 5
-      until: install_download.rc == 0
-
-    - name: "SETUP: Make install script executable"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }} chmod +x /root/install.sh
-      changed_when: true
-
-    - name: "SETUP: Install Coolify on controller"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        /bin/bash -c "TERM=dumb /root/install.sh"
-      register: install
-      changed_when: true
-      timeout: 900
-
-    - name: "SETUP: Wait for Coolify to be ready"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        curl -sf -o /dev/null http://localhost:8000
-      register: coolify_ready
-      changed_when: false
-      retries: 60
-      delay: 5
-      until: coolify_ready.rc == 0
-
-    - name: "SETUP: Enable API and create token"
-      ansible.builtin.shell: |
-        docker exec {{ controller_container }} docker exec coolify php artisan tinker --execute='
-        $settings = \App\Models\InstanceSettings::first();
-        $settings->is_api_enabled = true;
-        $settings->allowed_ips = "0.0.0.0";
-        $settings->save();
-        $user = \App\Models\User::first();
-        if (!$user) {
-            $user = \App\Models\User::create([
-                "name" => "admin",
-                "email" => "admin@test.local",
-                "password" => \Illuminate\Support\Facades\Hash::make("password123"),
-                "email_verified_at" => now(),
-            ]);
-        }
-        $team = $user->teams()->first();
-        if (!$team) {
-            $team = \App\Models\Team::create([
-                "name" => $user->name . " Team",
-                "personal_team" => true,
-            ]);
-            $user->teams()->attach($team->id, ["role" => "admin"]);
-        }
-        $plainToken = \Illuminate\Support\Str::random(40);
-        $newToken = new \Laravel\Sanctum\PersonalAccessToken();
-        $newToken->name = "ansible-test-token";
-        $newToken->token = hash("sha256", $plainToken);
-        $newToken->abilities = ["*"];
-        $newToken->tokenable_id = $user->id;
-        $newToken->tokenable_type = get_class($user);
-        $newToken->team_id = $team->id;
-        $newToken->save();
-        echo $plainToken;
-        '
-      register: token_result
-      changed_when: true
-      retries: 10
-      delay: 5
-      until: token_result.rc == 0
-
-    - name: "SETUP: Extract API token"
-      ansible.builtin.set_fact:
-        coolify_api_token: "{{ token_result.stdout_lines | last | trim }}"
-
-    - name: "SETUP: Verify API is working"
+    - name: "TEST: Verify API access"
       ansible.builtin.uri:
         url: "{{ coolify_api_base_url }}/version"
         method: GET
@@ -148,21 +160,23 @@
     # NR-001: Generate SSH Key for Worker Registration
     # ==========================================================================
     - name: "NR-001: Generate SSH key for Coolify to use"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        ssh-keygen -t rsa -b 4096 -f /tmp/coolify-test-key -N "" -C "coolify-test"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: ssh-keygen -t rsa -b 4096 -f /tmp/coolify-test-key -N "" -C "coolify-test"
       register: nr001_keygen
       changed_when: true
 
     - name: "NR-001: Read public key"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }} cat /tmp/coolify-test-key.pub
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: cat /tmp/coolify-test-key.pub
       register: nr001_pubkey
       changed_when: false
 
     - name: "NR-001: Read private key"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }} cat /tmp/coolify-test-key
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: cat /tmp/coolify-test-key
       register: nr001_privkey
       changed_when: false
 
@@ -200,14 +214,15 @@
     # NR-003: Distribute Public Key to Worker
     # ==========================================================================
     - name: "NR-003: Add public key to worker's authorized_keys"
-      ansible.builtin.command: >
-        docker exec {{ worker_container }}
-        /bin/bash -c "echo '{{ nr001_pubkey.stdout }}' >> /root/.ssh/authorized_keys"
+      community.docker.docker_container_exec:
+        container: "{{ worker_container }}"
+        command: /bin/bash -c "echo '{{ nr001_pubkey.stdout }}' >> /root/.ssh/authorized_keys"
       changed_when: true
 
     - name: "NR-003: Verify key in authorized_keys"
-      ansible.builtin.command: >
-        docker exec {{ worker_container }} cat /root/.ssh/authorized_keys
+      community.docker.docker_container_exec:
+        container: "{{ worker_container }}"
+        command: cat /root/.ssh/authorized_keys
       register: nr003_authkeys
       changed_when: false
 
@@ -361,13 +376,14 @@
         success_msg: "Server correctly removed from list"
 
   # ============================================================================
-  # CLEANUP
+  # POST_TASKS: Cleanup
   # ============================================================================
   post_tasks:
     - name: "CLEANUP: Destroy test containers"
-      ansible.builtin.command: >
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
-      changed_when: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
       ignore_errors: true
 
     - name: "CLEANUP: Remove test directories"

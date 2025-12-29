@@ -1,0 +1,6 @@
+# Environment variables for vikunja
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+VIKUNJA_SERVICE_JWTSECRET: "$SERVICE_PASSWORD_JWTSECRET"
+VIKUNJA_SERVICE_PUBLICURL: "$SERVICE_URL_VIKUNJA"

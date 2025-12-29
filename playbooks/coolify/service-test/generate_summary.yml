@@ -1,0 +1,102 @@
+---
+# Generate Service Compatibility Summary
+# Included by test_all.yml after all tests complete
+#
+# Expects:
+#   test_results: List of {service, status} dicts
+#   passed_services: List of passed service names
+#   failed_services: List of failed service names
+#   standalone_services: List of standalone services
+#   mariadb_services: List of mariadb services
+#   postgresql_services: List of postgresql services
+
+- name: "SUMMARY: Calculate statistics"
+  ansible.builtin.set_fact:
+    total_tested: "{{ test_results | length }}"
+    total_passed: "{{ passed_services | length }}"
+    total_failed: "{{ failed_services | length }}"
+    pass_rate: "{{ ((passed_services | length) / (test_results | length) * 100) | round(1) if test_results | length > 0 else 0 }}"
+
+- name: "SUMMARY: Categorize results"
+  ansible.builtin.set_fact:
+    standalone_passed: "{{ passed_services | intersect(standalone_services) }}"
+    standalone_failed: "{{ failed_services | intersect(standalone_services) }}"
+    mariadb_passed: "{{ passed_services | intersect(mariadb_services) }}"
+    mariadb_failed: "{{ failed_services | intersect(mariadb_services) }}"
+    postgresql_passed: "{{ passed_services | intersect(postgresql_services) }}"
+    postgresql_failed: "{{ failed_services | intersect(postgresql_services) }}"
+
+- name: "SUMMARY: Generate compatibility markdown"
+  ansible.builtin.copy:
+    content: |
+      # Coolify Service Compatibility
+
+      Auto-generated from service tests on {{ lookup('pipe', 'date -Iseconds') }}
+
+      ## Summary
+
+      | Category | Tested | Passed | Failed | Pass Rate |
+      |----------|--------|--------|--------|-----------|
+      | Standalone | {{ standalone_passed | length + standalone_failed | length }} | {{ standalone_passed | length }} | {{ standalone_failed | length }} | {{ ((standalone_passed | length) / ((standalone_passed | length) + (standalone_failed | length)) * 100) | round(1) if (standalone_passed | length + standalone_failed | length) > 0 else 'N/A' }}% |
+      | MariaDB | {{ mariadb_passed | length + mariadb_failed | length }} | {{ mariadb_passed | length }} | {{ mariadb_failed | length }} | {{ ((mariadb_passed | length) / ((mariadb_passed | length) + (mariadb_failed | length)) * 100) | round(1) if (mariadb_passed | length + mariadb_failed | length) > 0 else 'N/A' }}% |
+      | PostgreSQL | {{ postgresql_passed | length + postgresql_failed | length }} | {{ postgresql_passed | length }} | {{ postgresql_failed | length }} | {{ ((postgresql_passed | length) / ((postgresql_passed | length) + (postgresql_failed | length)) * 100) | round(1) if (postgresql_passed | length + postgresql_failed | length) > 0 else 'N/A' }}% |
+      | **Total** | **{{ total_tested }}** | **{{ total_passed }}** | **{{ total_failed }}** | **{{ pass_rate }}%** |
+
+      ## Standalone Services (No Database)
+
+      | Service | Status | Template | Notes |
+      |---------|--------|----------|-------|
+      {% for svc in standalone_passed | sort %}
+      | {{ svc }} | :white_check_mark: | [templates/{{ svc }}/](../templates/{{ svc }}/) | - |
+      {% endfor %}
+      {% for svc in standalone_failed | sort %}
+      | {{ svc }} | :x: | - | [See report](plan/service/{{ svc }}.md) |
+      {% endfor %}
+
+      ## MariaDB Services
+
+      | Service | Status | Template | Notes |
+      |---------|--------|----------|-------|
+      {% for svc in mariadb_passed | sort %}
+      | {{ svc }} | :white_check_mark: | [templates/{{ svc }}/](../templates/{{ svc }}/) | - |
+      {% endfor %}
+      {% for svc in mariadb_failed | sort %}
+      | {{ svc }} | :x: | - | [See report](plan/service/{{ svc }}.md) |
+      {% endfor %}
+
+      ## PostgreSQL Services
+
+      | Service | Status | Template | Notes |
+      |---------|--------|----------|-------|
+      {% for svc in postgresql_passed | sort %}
+      | {{ svc }} | :white_check_mark: | [templates/{{ svc }}/](../templates/{{ svc }}/) | - |
+      {% endfor %}
+      {% for svc in postgresql_failed | sort %}
+      | {{ svc }} | :x: | - | [See report](plan/service/{{ svc }}.md) |
+      {% endfor %}
+
+      ## Legend
+
+      - :white_check_mark: - Service tested successfully, template available
+      - :x: - Service failed testing, see report for details
+
+      ## Re-testing
+
+      ```bash
+      # Test a single service
+      make dev-test-service SERVICE=<service-name>
+
+      # Test all services in a category
+      make dev-test-standalone
+      make dev-test-mariadb
+      make dev-test-postgresql
+
+      # Test all services
+      make dev-test-all-services
+      ```
+    dest: "{{ playbook_dir }}/../../../docs/service_compatibility.md"
+    mode: '0644'
+
+- name: "SUMMARY: Report generated"
+  ansible.builtin.debug:
+    msg: "Compatibility report saved: docs/service_compatibility.md"

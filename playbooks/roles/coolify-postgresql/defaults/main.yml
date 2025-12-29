@@ -1,0 +1,109 @@
+---
+# PostgreSQL Patroni Cluster Configuration
+postgresql_cluster_name: "coolify_postgres"
+postgresql_scope: "postgres-cluster"
+
+# PostgreSQL Image Configuration
+postgresql_version: "16"
+postgresql_image: "postgres:{{ postgresql_version }}-alpine"
+patroni_image: "patroni-postgres:{{ postgresql_version }}"
+
+# etcd Configuration
+etcd_version: "3.5"
+etcd_image: "quay.io/coreos/etcd:v{{ etcd_version }}.0"
+etcd_client_port: 2379
+etcd_peer_port: 2380
+
+# Authentication
+postgresql_superuser: "postgres"
+postgresql_superuser_password: "{{ lookup('password', 'state/postgresql/superuser_password.txt length=32 chars=ascii_letters,digits') }}"
+postgresql_replication_user: "replicator"
+postgresql_replication_password: "{{ lookup('password', 'state/postgresql/replication_password.txt length=32 chars=ascii_letters,digits') }}"
+postgresql_app_database: "application"
+postgresql_app_user: "app_user"
+postgresql_app_password: "{{ lookup('password', 'state/postgresql/app_password.txt length=32 chars=ascii_letters,digits') }}"
+
+# Service Discovery Hostname
+# All nodes resolve this to their local PostgreSQL container
+postgresql_hostname: "db.postgres.host.uk.com"
+postgresql_port: 5432
+
+# Patroni Configuration
+patroni_restapi_port: 8008
+patroni_ttl: 30
+patroni_loop_wait: 10
+patroni_retry_timeout: 10
+patroni_maximum_lag_on_failover: 1048576
+
+# Node Configuration
+# Override in inventory or playbook vars for your environment
+postgresql_nodes:
+  - name: "postgres-node-1"
+    host: "app-server-1.lan"
+    ip: "172.28.0.20"
+    role: "primary"
+
+  - name: "postgres-node-2"
+    host: "app-server-2.lan"
+    ip: "172.28.0.21"
+    role: "replica"
+
+  - name: "postgres-node-3"
+    host: "controller.lan"
+    ip: "172.28.0.10"
+    role: "replica"
+
+  - name: "postgres-node-4"
+    host: "builder.lan"
+    ip: "172.28.0.30"
+    role: "replica"
+
+# Coolify Integration
+postgresql_project_name: "postgresql-cluster"
+postgresql_environment_name: "production"
+postgresql_instant_deploy: true
+
+# Resource Limits
+postgresql_memory_limit: "2g"
+postgresql_cpu_limit: "2"
+etcd_memory_limit: "512m"
+etcd_cpu_limit: "0.5"
+
+# PostgreSQL Settings
+postgresql_max_connections: 100
+postgresql_shared_buffers: "256MB"
+postgresql_work_mem: "8MB"
+postgresql_maintenance_work_mem: "64MB"
+postgresql_wal_level: "replica"
+postgresql_max_wal_senders: 10
+postgresql_max_replication_slots: 10
+postgresql_hot_standby: "on"
+
+# Timeouts
+postgresql_health_check_interval: 10
+postgresql_health_check_timeout: 5
+postgresql_health_check_retries: 5
+postgresql_health_check_start_period: 60
+
+# Primary node computed from nodes list
+postgresql_primary_node: "{{ postgresql_nodes | selectattr('role', 'equalto', 'primary') | first }}"
+postgresql_primary_ip: "{{ postgresql_primary_node.ip }}"
+
+# etcd cluster address computed from nodes
+etcd_initial_cluster: >-
+  {{
+    postgresql_nodes
+    | map(attribute='name')
+    | zip(postgresql_nodes | map(attribute='ip'))
+    | map('join', '=http://')
+    | map('regex_replace', '$', ':' ~ etcd_peer_port)
+    | join(',')
+  }}
+
+# Bootstrap settings
+postgresql_is_primary: false
+postgresql_is_initial_deploy: false
+
+# Backup settings
+postgresql_backup_dir: "state/postgresql/backups"
+postgresql_backup_retention_days: 7

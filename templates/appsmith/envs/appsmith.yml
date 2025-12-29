@@ -1,0 +1,9 @@
+# Environment variables for appsmith
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+APPSMITH_DISABLE_INTERCOM: "true"
+APPSMITH_DISABLE_TELEMETRY: "false"
+APPSMITH_MAIL_ENABLED: "false"
+APPSMITH_SENTRY_DSN: ""
+APPSMITH_SMART_LOOK_ID: ""

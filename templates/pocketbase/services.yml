@@ -1,0 +1,21 @@
+# Service definition for: pocketbase
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=pocketbase -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: pocketbase
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          pocketbase:
+            image: 'ghcr.io/coollabsio/pocketbase:latest'
+            environment:
+              - SERVICE_URL_POCKETBASE_8080
+            volumes:
+              - 'pocketbase-data:/app/pb_data'
+              - 'pocketbase-hooks:/app/pb_hooks'
+

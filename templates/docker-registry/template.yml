@@ -1,0 +1,9 @@
+# Template: docker-registry
+# Auto-generated from service test
+# Date: 2025-12-29T03:21:47+00:00
+
+name: docker-registry
+service_type: docker-registry
+source: automated-test
+tested: true
+test_date: 2025-12-29T03:21:47+00:00

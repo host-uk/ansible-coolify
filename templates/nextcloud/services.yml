@@ -1,0 +1,33 @@
+# Service definition for: nextcloud
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=nextcloud -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: nextcloud
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          nextcloud:
+            image: 'lscr.io/linuxserver/nextcloud:latest'
+            environment:
+              - SERVICE_URL_NEXTCLOUD_80
+              - PUID=1000
+              - PGID=1000
+              - 'TZ=${TZ:-Europe/Madrid}'
+            volumes:
+              - 'nextcloud-config:/config'
+              - 'nextcloud-data:/data'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:80'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

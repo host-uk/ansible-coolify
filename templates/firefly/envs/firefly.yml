@@ -1,0 +1,12 @@
+# Environment variables for firefly
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+APP_KEY: "$SERVICE_BASE64_APPKEY"
+DB_PASSWORD: "$SERVICE_PASSWORD_MYSQL"
+DB_USERNAME: "$SERVICE_USER_MYSQL"
+MYSQL_DATABASE: "firefly"
+MYSQL_PASSWORD: "${SERVICE_PASSWORD_MYSQL}"
+MYSQL_ROOT_PASSWORD: "${SERVICE_PASSWORD_MYSQLROOT}"
+MYSQL_USER: "${SERVICE_USER_MYSQL}"
+STATIC_CRON_TOKEN: "$SERVICE_BASE64_CRONTOKEN"

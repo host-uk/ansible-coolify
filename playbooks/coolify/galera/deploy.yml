@@ -1,0 +1,95 @@
+---
+# Deploy MariaDB Galera Cluster
+#
+# This playbook deploys a full Galera cluster via Coolify Services API.
+# It bootstraps the first node, then joins remaining nodes sequentially.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/deploy.yml
+#
+# Variables (can be overridden with -e):
+#   galera_hostname: Service discovery hostname (default: db.host.uk.com)
+#   galera_project_name: Coolify project name (default: galera-cluster)
+#   galera_nodes: List of node configurations (see defaults)
+
+- name: Deploy MariaDB Galera Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+  vars:
+    galera_is_initial_deploy: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║           MARIADB GALERA CLUSTER DEPLOYMENT                  ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  This will deploy a {{ galera_nodes | default([]) | length }}-node Galera cluster via Coolify.    ║
+          ║                                                              ║
+          ║  Service hostname: {{ galera_hostname | default('db.host.uk.com') }}
+          ║  MariaDB version: {{ galera_mariadb_version | default('11.4') }}
+          ╚══════════════════════════════════════════════════════════════╝
+
+  tasks:
+    - name: Ensure Galera state directory exists
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - state/galera
+        - state/galera/backups
+      delegate_to: localhost
+
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Galera role defaults
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: main.yml
+
+    - name: Configure /etc/hosts on all nodes
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: configure_hosts.yml
+      ignore_errors: true  # Continue even if some hosts unreachable
+
+    - name: Bootstrap first Galera node
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: bootstrap_cluster.yml
+
+    - name: Join remaining nodes to cluster
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: join_cluster.yml
+
+    - name: Verify cluster health
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: health_check.yml
+      vars:
+        galera_health_check_strict: false  # Don't fail on first check
+
+    - name: Display connection information
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║              GALERA CLUSTER DEPLOYED                         ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  Connection Details:                                         ║
+          ║    Host: {{ galera_hostname }}
+          ║    Port: {{ galera_port }}
+          ║    Database: {{ galera_app_database }}
+          ║    User: {{ galera_app_user }}
+          ║    Password: (stored in state/galera/app_password.txt)       ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  Cluster Status:                                             ║
+          ║    Nodes: {{ galera_running_count | default('?') }}/{{ galera_nodes | length }} running
+          ║    Healthy: {{ galera_cluster_healthy | default('unknown') }}
+          ╚══════════════════════════════════════════════════════════════╝

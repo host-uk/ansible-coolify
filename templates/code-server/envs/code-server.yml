@@ -1,0 +1,6 @@
+# Environment variables for code-server
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+PASSWORD: "$SERVICE_PASSWORD_64_PASSWORDCODESERVER"
+SUDO_PASSWORD: "$SERVICE_PASSWORD_SUDOCODESERVER"

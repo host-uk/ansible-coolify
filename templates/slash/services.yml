@@ -1,0 +1,30 @@
+# Service definition for: slash
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=slash -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: slash
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          slash:
+            image: yourselfhosted/slash
+            environment:
+              - SERVICE_URL_SLASH_5231
+            volumes:
+              - 'slash-data:/var/opt/slash'
+            healthcheck:
+              test:
+                - CMD
+                - wget
+                - '-q'
+                - '--spider'
+                - 'http://127.0.0.1:5231'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

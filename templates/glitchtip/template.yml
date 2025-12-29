@@ -1,0 +1,9 @@
+# Template: glitchtip
+# Auto-generated from service test
+# Date: 2025-12-29T08:23:47+00:00
+
+name: glitchtip
+service_type: glitchtip
+source: automated-test
+tested: true
+test_date: 2025-12-29T08:23:47+00:00

@@ -1,0 +1,17 @@
+# Environment variables for ghost
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+database__connection__password: "$SERVICE_PASSWORD_MYSQL"
+database__connection__user: "$SERVICE_USER_MYSQL"
+MAIL_OPTIONS_AUTH_PASS: ""
+MAIL_OPTIONS_AUTH_USER: ""
+MAIL_OPTIONS_HOST: ""
+MAIL_OPTIONS_PORT: "465"
+MAIL_OPTIONS_SECURE: "true"
+MAIL_OPTIONS_SERVICE: "Mailgun"
+MYSQL_DATABASE: "ghost"
+MYSQL_PASSWORD: "${SERVICE_PASSWORD_MYSQL}"
+MYSQL_ROOT_PASSWORD: "${SERVICE_PASSWORD_MYSQLROOT}"
+MYSQL_USER: "${SERVICE_USER_MYSQL}"
+url: "$SERVICE_URL_GHOST"

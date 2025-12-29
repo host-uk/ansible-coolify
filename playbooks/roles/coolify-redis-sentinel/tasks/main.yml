@@ -1,0 +1,46 @@
+---
+# Coolify Redis Sentinel Role - Main Entry Point
+#
+# This role deploys a Redis Sentinel Cluster via Coolify Services API.
+# Provides high-availability Redis with automatic failover.
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/redis/deploy.yml
+#
+# Variables:
+#   redis_nodes: List of nodes with name, host, ip, role
+#   redis_hostname: Service discovery hostname (default: cache.host.uk.com)
+#   redis_master_name: Sentinel master name (default: mymaster)
+#
+# The role can be included with specific task files:
+#   tasks_from: deploy_node.yml       - Deploy single node
+#   tasks_from: bootstrap_cluster.yml - Bootstrap master node
+#   tasks_from: join_cluster.yml      - Join replica to cluster
+#   tasks_from: health_check.yml      - Verify cluster health
+#   tasks_from: failover.yml          - Trigger manual failover
+
+- name: Ensure Redis state directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - state/redis
+    - state/redis/backups
+  delegate_to: localhost
+  run_once: true
+
+- name: Display Redis Sentinel cluster configuration
+  ansible.builtin.debug:
+    msg: |
+      Redis Sentinel Cluster Configuration:
+        Cluster Name: {{ redis_cluster_name }}
+        Master Name: {{ redis_master_name }}
+        Redis Version: {{ redis_version }}
+        Service Hostname: {{ redis_hostname }}
+        Sentinel Quorum: {{ redis_sentinel_quorum }}
+        Nodes:
+      {% for node in redis_nodes %}
+          - {{ node.name }} ({{ node.ip }}) - {{ node.role }}
+      {% endfor %}
+        Master IP: {{ redis_master_ip }}

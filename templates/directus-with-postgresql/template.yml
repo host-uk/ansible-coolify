@@ -1,0 +1,9 @@
+# Template: directus-with-postgresql
+# Auto-generated from service test
+# Date: 2025-12-29T08:05:44+00:00
+
+name: directus-with-postgresql
+service_type: directus-with-postgresql
+source: automated-test
+tested: true
+test_date: 2025-12-29T08:05:44+00:00

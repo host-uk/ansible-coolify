@@ -1,0 +1,9 @@
+# Template: moodle
+# Auto-generated from service test
+# Date: 2025-12-29T07:47:44+00:00
+
+name: moodle
+service_type: moodle
+source: automated-test
+tested: true
+test_date: 2025-12-29T07:47:44+00:00

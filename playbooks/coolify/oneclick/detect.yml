@@ -1,0 +1,72 @@
+---
+# Detect Database Requirements for a Service
+#
+# This playbook detects the database requirements for a one-click service
+# without deploying it.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/oneclick/detect.yml \
+#     -e oneclick_service_type=chatwoot
+
+- name: Detect Database Requirements
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  pre_tasks:
+    - name: Validate service type provided
+      ansible.builtin.assert:
+        that:
+          - oneclick_service_type is defined
+          - oneclick_service_type | length > 0
+        fail_msg: "Usage: -e oneclick_service_type=<service_type>"
+
+  tasks:
+    - name: Load database mappings
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/coolify-oneclick-app/vars/database_mappings.yml"
+
+    - name: Set dummy app name for detection
+      ansible.builtin.set_fact:
+        oneclick_app_name: "detection-test"
+
+    - name: Detect requirements
+      ansible.builtin.include_role:
+        name: coolify-oneclick-app
+        tasks_from: detect_database.yml
+
+    - name: Display detection results
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    DATABASE DETECTION: {{ oneclick_service_type }}
+          ====================================================================
+            Service Type: {{ oneclick_service_type }}
+            Normalized: {{ oneclick_service_normalized }}
+
+            Requirements:
+              Database Type: {{ oneclick_database_type }}
+              PostgreSQL: {{ oneclick_requires_postgresql }}
+              MariaDB: {{ oneclick_requires_mariadb }}
+              Redis: {{ oneclick_requires_redis }}
+              Standalone: {{ oneclick_is_standalone }}
+
+            {% if oneclick_env_overrides | length > 0 %}
+            Service-Specific Overrides:
+              {{ oneclick_env_overrides | to_nice_yaml | indent(14) }}
+            {% endif %}
+
+            Shared Infrastructure Required:
+            {% if oneclick_requires_postgresql %}
+              - PostgreSQL Patroni cluster (db.postgres.host.uk.com)
+            {% endif %}
+            {% if oneclick_requires_mariadb %}
+              - Galera MariaDB cluster (db.host.uk.com)
+            {% endif %}
+            {% if oneclick_requires_redis %}
+              - Redis Sentinel cluster (cache.host.uk.com)
+            {% endif %}
+            {% if oneclick_is_standalone %}
+              - None (standalone service)
+            {% endif %}
+          ====================================================================

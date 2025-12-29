@@ -1,0 +1,32 @@
+# Service definition for: budge
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=budge -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: budge
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          budge:
+            image: 'lscr.io/linuxserver/budge:latest'
+            environment:
+              - SERVICE_URL_BUDGE
+              - PUID=1000
+              - PGID=1000
+              - TZ=Europe/Madrid
+            volumes:
+              - 'budge-config:/config'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:80'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

@@ -1,0 +1,13 @@
+# Environment variables for directus-with-postgresql
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+ADMIN_EMAIL: "admin@example.com"
+ADMIN_PASSWORD: "$SERVICE_PASSWORD_ADMIN"
+DB_PASSWORD: "$SERVICE_PASSWORD_POSTGRESQL"
+DB_USER: "$SERVICE_USER_POSTGRESQL"
+KEY: "$SERVICE_BASE64_64_KEY"
+POSTGRES_PASSWORD: "${SERVICE_PASSWORD_POSTGRESQL}"
+POSTGRES_USER: "${SERVICE_USER_POSTGRESQL}"
+POSTGRESQL_DATABASE: "directus"
+SECRET: "$SERVICE_BASE64_64_SECRET"

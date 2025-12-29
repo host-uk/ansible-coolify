@@ -1,0 +1,9 @@
+# Template: classicpress-with-mysql
+# Auto-generated from service test
+# Date: 2025-12-29T07:38:46+00:00
+
+name: classicpress-with-mysql
+service_type: classicpress-with-mysql
+source: automated-test
+tested: true
+test_date: 2025-12-29T07:38:46+00:00

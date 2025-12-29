@@ -1,0 +1,32 @@
+# Service definition for: dokuwiki
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=dokuwiki -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: dokuwiki
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          dokuwiki:
+            image: 'lscr.io/linuxserver/dokuwiki:latest'
+            environment:
+              - SERVICE_URL_DOKUWIKI
+              - PUID=1000
+              - PGID=1000
+              - TZ=Europe/Madrid
+            volumes:
+              - 'dokuwiki-config:/config'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:80'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

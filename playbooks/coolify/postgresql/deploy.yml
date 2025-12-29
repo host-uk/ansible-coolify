@@ -1,0 +1,93 @@
+---
+# Deploy PostgreSQL Patroni Cluster
+#
+# This playbook deploys a full PostgreSQL Patroni cluster via Coolify Services API.
+# It bootstraps the primary node with etcd, then joins replicas sequentially.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/postgresql/deploy.yml
+#
+# Variables (can be overridden with -e):
+#   postgresql_hostname: Service discovery hostname (default: db.postgres.host.uk.com)
+#   postgresql_project_name: Coolify project name (default: postgresql-cluster)
+#   postgresql_nodes: List of node configurations (see defaults)
+
+- name: Deploy PostgreSQL Patroni Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    POSTGRESQL PATRONI CLUSTER DEPLOYMENT
+          ====================================================================
+            This will deploy a {{ postgresql_nodes | default([]) | length }}-node PostgreSQL Patroni cluster via Coolify.
+
+            Service hostname: {{ postgresql_hostname | default('db.postgres.host.uk.com') }}
+            PostgreSQL version: {{ postgresql_version | default('16') }}
+            Patroni scope: {{ postgresql_scope | default('postgres-cluster') }}
+          ====================================================================
+
+  tasks:
+    - name: Ensure PostgreSQL state directory exists
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - state/postgresql
+        - state/postgresql/backups
+      delegate_to: localhost
+
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include PostgreSQL Patroni role defaults
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: main.yml
+
+    - name: Bootstrap primary PostgreSQL node
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: bootstrap_cluster.yml
+
+    - name: Join replica nodes to cluster
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: join_cluster.yml
+
+    - name: Verify cluster health
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: health_check.yml
+      vars:
+        postgresql_health_fail_on_error: false
+
+    - name: Display connection information
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    POSTGRESQL PATRONI CLUSTER DEPLOYED
+          ====================================================================
+            Connection Details:
+              Host: {{ postgresql_hostname }}
+              Port: {{ postgresql_port }}
+              Database: {{ postgresql_app_database }}
+              User: {{ postgresql_app_user }}
+              Password: (stored in state/postgresql/app_password.txt)
+
+            Patroni REST API:
+              Port: {{ patroni_restapi_port }}
+              Endpoints: /cluster, /leader, /replica, /health
+
+            Cluster Status:
+              Primary: {{ postgresql_primary_node.name }} ({{ postgresql_primary_ip }})
+              Replicas: {{ postgresql_nodes | rejectattr('role', 'equalto', 'primary') | list | length }}
+              Total nodes: {{ postgresql_nodes | length }}
+          ====================================================================

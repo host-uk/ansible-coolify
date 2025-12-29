@@ -1,0 +1,33 @@
+# Service definition for: babybuddy
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=babybuddy -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: babybuddy
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          babybuddy:
+            image: 'lscr.io/linuxserver/babybuddy:latest'
+            environment:
+              - SERVICE_URL_BABYBUDDY
+              - PUID=1000
+              - PGID=1000
+              - TZ=Europe/Madrid
+              - CSRF_TRUSTED_ORIGINS=$SERVICE_URL_BABYBUDDY
+            volumes:
+              - 'babybuddy-config:/config'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:8000'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

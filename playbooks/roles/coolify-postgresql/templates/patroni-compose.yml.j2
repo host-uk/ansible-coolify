@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  etcd:
+    image: {{ etcd_image }}
+    container_name: etcd-{{ postgresql_node_name }}
+    hostname: etcd-{{ postgresql_node_name }}
+    command:
+      - etcd
+      - --name={{ postgresql_node_name }}
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:{{ etcd_client_port }}
+      - --advertise-client-urls=http://{{ postgresql_node_ip }}:{{ etcd_client_port }}
+      - --listen-peer-urls=http://0.0.0.0:{{ etcd_peer_port }}
+      - --initial-advertise-peer-urls=http://{{ postgresql_node_ip }}:{{ etcd_peer_port }}
+      - --initial-cluster={{ etcd_initial_cluster }}
+{% if postgresql_is_primary %}
+      - --initial-cluster-state=new
+{% else %}
+      - --initial-cluster-state=existing
+{% endif %}
+      - --initial-cluster-token={{ postgresql_cluster_name }}
+    volumes:
+      - etcd-data:/etcd-data
+    ports:
+      - "{{ etcd_client_port }}:{{ etcd_client_port }}"
+      - "{{ etcd_peer_port }}:{{ etcd_peer_port }}"
+    networks:
+      - coolify
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health", "--endpoints=http://localhost:{{ etcd_client_port }}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: {{ etcd_memory_limit }}
+          cpus: '{{ etcd_cpu_limit }}'
+    restart: unless-stopped
+    extra_hosts:
+{% for node in postgresql_nodes %}
+      - "{{ node.name }}:{{ node.ip }}"
+      - "etcd-{{ node.name }}:{{ node.ip }}"
+{% endfor %}
+
+  patroni:
+    image: {{ postgresql_image }}
+    container_name: patroni-{{ postgresql_node_name }}
+    hostname: patroni-{{ postgresql_node_name }}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Install Patroni and dependencies
+        apk add --no-cache python3 py3-pip py3-psycopg2 curl
+        pip3 install --break-system-packages patroni[etcd3] python-etcd
+
+        # Create Patroni config directory
+        mkdir -p /etc/patroni
+
+        # Write Patroni configuration
+        cat > /etc/patroni/patroni.yml << 'PATRONI_CONFIG'
+        {{ patroni_config | indent(8) }}
+        PATRONI_CONFIG
+
+        # Start Patroni
+        exec patroni /etc/patroni/patroni.yml
+    environment:
+      PATRONI_NAME: "{{ postgresql_node_name }}"
+      PATRONI_SCOPE: "{{ postgresql_scope }}"
+      PATRONI_ETCD3_HOSTS: "{{ postgresql_nodes | map(attribute='ip') | map('regex_replace', '$', ':' ~ etcd_client_port) | join(',') }}"
+      PATRONI_RESTAPI_CONNECT_ADDRESS: "{{ postgresql_node_ip }}:{{ patroni_restapi_port }}"
+      PATRONI_RESTAPI_LISTEN: "0.0.0.0:{{ patroni_restapi_port }}"
+      PATRONI_POSTGRESQL_CONNECT_ADDRESS: "{{ postgresql_node_ip }}:{{ postgresql_port }}"
+      PATRONI_POSTGRESQL_LISTEN: "0.0.0.0:{{ postgresql_port }}"
+      PATRONI_POSTGRESQL_DATA_DIR: "/var/lib/postgresql/data"
+      PATRONI_SUPERUSER_USERNAME: "{{ postgresql_superuser }}"
+      PATRONI_SUPERUSER_PASSWORD: "{{ postgresql_superuser_password }}"
+      PATRONI_REPLICATION_USERNAME: "{{ postgresql_replication_user }}"
+      PATRONI_REPLICATION_PASSWORD: "{{ postgresql_replication_password }}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "{{ postgresql_port }}:5432"
+      - "{{ patroni_restapi_port }}:{{ patroni_restapi_port }}"
+    networks:
+      - coolify
+    depends_on:
+      etcd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:{{ patroni_restapi_port }}/health"]
+      interval: {{ postgresql_health_check_interval }}s
+      timeout: {{ postgresql_health_check_timeout }}s
+      retries: {{ postgresql_health_check_retries }}
+      start_period: {{ postgresql_health_check_start_period }}s
+    deploy:
+      resources:
+        limits:
+          memory: {{ postgresql_memory_limit }}
+          cpus: '{{ postgresql_cpu_limit }}'
+    restart: unless-stopped
+    extra_hosts:
+{% for node in postgresql_nodes %}
+      - "{{ node.name }}:{{ node.ip }}"
+      - "patroni-{{ node.name }}:{{ node.ip }}"
+{% endfor %}
+      - "{{ postgresql_hostname }}:{{ postgresql_node_ip }}"
+
+volumes:
+  etcd-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  coolify:
+    external: true

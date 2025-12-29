@@ -1,0 +1,58 @@
+---
+# Trigger Manual PostgreSQL Patroni Switchover
+#
+# This playbook triggers a manual switchover in the PostgreSQL Patroni cluster,
+# promoting a replica to become the new primary.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/postgresql/switchover.yml
+#   ansible-playbook -i inventory/ playbooks/coolify/postgresql/switchover.yml -e postgresql_target_leader=postgres-node-2
+
+- name: Trigger PostgreSQL Patroni Switchover
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display switchover warning
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    POSTGRESQL PATRONI MANUAL SWITCHOVER
+          ====================================================================
+            WARNING: This will trigger a switchover to a new primary!
+
+            The current primary will be demoted to replica and a replica
+            will be promoted to primary.
+
+            This should be used for:
+              - Planned maintenance
+              - Testing failover procedures
+              - Replacing a problematic primary
+
+            The cluster will remain available during switchover.
+            Unlike failover, switchover is a controlled operation.
+          ====================================================================
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include PostgreSQL Patroni role defaults
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: main.yml
+
+    - name: Execute switchover
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: switchover.yml
+
+    - name: Verify cluster health after switchover
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: health_check.yml
+      vars:
+        postgresql_health_fail_on_error: false

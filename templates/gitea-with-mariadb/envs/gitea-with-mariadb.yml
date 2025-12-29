@@ -1,0 +1,10 @@
+# Environment variables for gitea-with-mariadb
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+GITEA__database__PASSWD: "$SERVICE_PASSWORD_MYSQL"
+GITEA__database__USER: "$SERVICE_USER_MYSQL"
+MYSQL_DATABASE: "gitea"
+MYSQL_PASSWORD: "${SERVICE_PASSWORD_MYSQL}"
+MYSQL_ROOT_PASSWORD: "${SERVICE_PASSWORD_MYSQLROOT}"
+MYSQL_USER: "${SERVICE_USER_MYSQL}"

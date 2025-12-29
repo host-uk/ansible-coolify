@@ -1,0 +1,233 @@
+---
+# Deploy Complete Shared Infrastructure Cluster
+#
+# This playbook deploys the full shared infrastructure stack:
+# 1. MariaDB Galera Cluster (multi-master database)
+# 2. Redis Sentinel Cluster (HA caching)
+# 3. PostgreSQL Patroni Cluster (HA PostgreSQL)
+#
+# All services use local hostname resolution for service discovery,
+# allowing applications to connect via consistent hostnames.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/cluster/deploy.yml
+#
+# Optional flags:
+#   -e skip_galera=true      - Skip Galera deployment
+#   -e skip_redis=true       - Skip Redis deployment
+#   -e skip_postgresql=true  - Skip PostgreSQL deployment
+
+- name: Deploy Complete Shared Infrastructure Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+  vars:
+    skip_galera: false
+    skip_redis: false
+    skip_postgresql: false
+    cluster_health_check: true
+
+  pre_tasks:
+    - name: Display deployment plan
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SHARED INFRASTRUCTURE CLUSTER DEPLOYMENT
+          ====================================================================
+            This will deploy the complete shared infrastructure stack:
+
+            1. MariaDB Galera Cluster {{ '(SKIP)' if skip_galera else '' }}
+               - Multi-master replication
+               - Hostname: {{ galera_hostname | default('db.host.uk.com') }}
+               - Nodes: {{ galera_nodes | default([]) | length }}
+
+            2. Redis Sentinel Cluster {{ '(SKIP)' if skip_redis else '' }}
+               - High-availability caching
+               - Hostname: {{ redis_hostname | default('cache.host.uk.com') }}
+               - Nodes: {{ redis_nodes | default([]) | length }}
+
+            3. PostgreSQL Patroni Cluster {{ '(SKIP)' if skip_postgresql else '' }}
+               - Automatic failover PostgreSQL
+               - Hostname: {{ postgresql_hostname | default('db.postgres.host.uk.com') }}
+               - Nodes: {{ postgresql_nodes | default([]) | length }}
+
+            Deployment will proceed sequentially to ensure dependencies.
+          ====================================================================
+
+    - name: Ensure state directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0700'
+      loop:
+        - state/galera
+        - state/galera/backups
+        - state/redis
+        - state/redis/backups
+        - state/postgresql
+        - state/postgresql/backups
+        - state/oneclick
+      delegate_to: localhost
+
+  tasks:
+    # ==========================================================================
+    # Setup Coolify API Access
+    # ==========================================================================
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    # ==========================================================================
+    # Phase 1: Deploy Galera Cluster
+    # ==========================================================================
+    - name: "PHASE 1: Deploy MariaDB Galera Cluster"
+      when: not skip_galera
+      block:
+        - name: Display Galera deployment start
+          ansible.builtin.debug:
+            msg: |
+              ====================================================================
+                        PHASE 1: MariaDB Galera Cluster
+              ====================================================================
+
+        - name: Include Galera role defaults
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: main.yml
+
+        - name: Bootstrap first Galera node
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: bootstrap_cluster.yml
+
+        - name: Join remaining Galera nodes
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: join_cluster.yml
+
+        - name: Verify Galera cluster health
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: health_check.yml
+          vars:
+            galera_health_check_strict: false
+          when: cluster_health_check
+
+        - name: Display Galera deployment complete
+          ansible.builtin.debug:
+            msg: "Galera cluster deployment complete"
+
+    # ==========================================================================
+    # Phase 2: Deploy Redis Sentinel Cluster
+    # ==========================================================================
+    - name: "PHASE 2: Deploy Redis Sentinel Cluster"
+      when: not skip_redis
+      block:
+        - name: Display Redis deployment start
+          ansible.builtin.debug:
+            msg: |
+              ====================================================================
+                        PHASE 2: Redis Sentinel Cluster
+              ====================================================================
+
+        - name: Include Redis Sentinel role defaults
+          ansible.builtin.include_role:
+            name: coolify-redis-sentinel
+            tasks_from: main.yml
+
+        - name: Bootstrap master Redis node
+          ansible.builtin.include_role:
+            name: coolify-redis-sentinel
+            tasks_from: bootstrap_cluster.yml
+
+        - name: Join replica and sentinel nodes
+          ansible.builtin.include_role:
+            name: coolify-redis-sentinel
+            tasks_from: join_cluster.yml
+
+        - name: Verify Redis Sentinel cluster health
+          ansible.builtin.include_role:
+            name: coolify-redis-sentinel
+            tasks_from: health_check.yml
+          vars:
+            redis_health_fail_on_error: false
+          when: cluster_health_check
+
+        - name: Display Redis deployment complete
+          ansible.builtin.debug:
+            msg: "Redis Sentinel cluster deployment complete"
+
+    # ==========================================================================
+    # Phase 3: Deploy PostgreSQL Patroni Cluster
+    # ==========================================================================
+    - name: "PHASE 3: Deploy PostgreSQL Patroni Cluster"
+      when: not skip_postgresql
+      block:
+        - name: Display PostgreSQL deployment start
+          ansible.builtin.debug:
+            msg: |
+              ====================================================================
+                        PHASE 3: PostgreSQL Patroni Cluster
+              ====================================================================
+
+        - name: Include PostgreSQL Patroni role defaults
+          ansible.builtin.include_role:
+            name: coolify-postgresql
+            tasks_from: main.yml
+
+        - name: Bootstrap primary PostgreSQL node
+          ansible.builtin.include_role:
+            name: coolify-postgresql
+            tasks_from: bootstrap_cluster.yml
+
+        - name: Join replica nodes to cluster
+          ansible.builtin.include_role:
+            name: coolify-postgresql
+            tasks_from: join_cluster.yml
+
+        - name: Verify PostgreSQL Patroni cluster health
+          ansible.builtin.include_role:
+            name: coolify-postgresql
+            tasks_from: health_check.yml
+          vars:
+            postgresql_health_fail_on_error: false
+          when: cluster_health_check
+
+        - name: Display PostgreSQL deployment complete
+          ansible.builtin.debug:
+            msg: "PostgreSQL Patroni cluster deployment complete"
+
+  # ============================================================================
+  # Post Tasks: Display Summary
+  # ============================================================================
+  post_tasks:
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SHARED INFRASTRUCTURE DEPLOYMENT COMPLETE
+          ====================================================================
+            All clusters have been deployed successfully.
+
+            MariaDB Galera: {{ 'DEPLOYED' if not skip_galera else 'SKIPPED' }}
+              Host: {{ galera_hostname | default('db.host.uk.com') }}
+              Port: {{ galera_port | default(3306) }}
+              Credentials: state/galera/
+
+            Redis Sentinel: {{ 'DEPLOYED' if not skip_redis else 'SKIPPED' }}
+              Host: {{ redis_hostname | default('cache.host.uk.com') }}
+              Port: {{ redis_port | default(6379) }}
+              Sentinel: {{ redis_sentinel_port | default(26379) }}
+              Credentials: state/redis/
+
+            PostgreSQL Patroni: {{ 'DEPLOYED' if not skip_postgresql else 'SKIPPED' }}
+              Host: {{ postgresql_hostname | default('db.postgres.host.uk.com') }}
+              Port: {{ postgresql_port | default(5432) }}
+              Credentials: state/postgresql/
+
+            Next Steps:
+              1. Verify cluster status: make dev-cluster-status
+              2. Deploy apps: make dev-oneclick-deploy APP=chatwoot NAME=my-app
+              3. Check available apps: make dev-oneclick-list
+          ====================================================================

@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+{% if not redis_is_sentinel_only %}
+  redis:
+    image: {{ redis_image }}
+    container_name: redis-{{ redis_node_name }}
+    hostname: {{ redis_node_name }}
+    command:
+      - redis-server
+      - --requirepass
+      - "{{ redis_password }}"
+      - --masterauth
+      - "{{ redis_password }}"
+{% if not redis_is_master %}
+      - --replicaof
+      - "{{ redis_master_ip }}"
+      - "{{ redis_port }}"
+{% endif %}
+      - --maxmemory
+      - "{{ redis_maxmemory }}"
+      - --maxmemory-policy
+      - "{{ redis_maxmemory_policy }}"
+      - --appendonly
+      - "{{ redis_appendonly }}"
+      - --replica-announce-ip
+      - "{{ redis_node_ip }}"
+      - --replica-announce-port
+      - "{{ redis_port }}"
+    volumes:
+      - redis-data:/data
+    ports:
+      - "{{ redis_port }}:6379"
+    networks:
+      - coolify
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "{{ redis_password }}", "ping"]
+      interval: {{ redis_health_check_interval }}s
+      timeout: {{ redis_health_check_timeout }}s
+      retries: {{ redis_health_check_retries }}
+      start_period: {{ redis_health_check_start_period }}s
+    deploy:
+      resources:
+        limits:
+          memory: {{ redis_memory_limit }}
+          cpus: '{{ redis_cpu_limit }}'
+    restart: unless-stopped
+    extra_hosts:
+{% for node in redis_nodes %}
+      - "{{ node.name }}:{{ node.ip }}"
+{% endfor %}
+      - "{{ redis_hostname }}:{{ redis_node_ip }}"
+{% endif %}
+
+  sentinel:
+    image: {{ redis_image }}
+    container_name: sentinel-{{ redis_node_name }}
+    hostname: sentinel-{{ redis_node_name }}
+    command:
+      - redis-sentinel
+      - /etc/redis/sentinel.conf
+    volumes:
+      - sentinel-data:/data
+      - ./sentinel.conf:/etc/redis/sentinel.conf:ro
+    ports:
+      - "{{ redis_sentinel_port }}:26379"
+    networks:
+      - coolify
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: {{ redis_health_check_interval }}s
+      timeout: {{ redis_health_check_timeout }}s
+      retries: {{ redis_health_check_retries }}
+      start_period: {{ redis_health_check_start_period }}s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+    restart: unless-stopped
+{% if not redis_is_sentinel_only %}
+    depends_on:
+      redis:
+        condition: service_healthy
+{% endif %}
+    extra_hosts:
+{% for node in redis_nodes %}
+      - "{{ node.name }}:{{ node.ip }}"
+{% endfor %}
+      - "{{ redis_hostname }}:{{ redis_node_ip }}"
+
+volumes:
+{% if not redis_is_sentinel_only %}
+  redis-data:
+    driver: local
+{% endif %}
+  sentinel-data:
+    driver: local
+
+networks:
+  coolify:
+    external: true

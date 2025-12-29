@@ -1,0 +1,5 @@
+# Environment variables for babybuddy
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+CSRF_TRUSTED_ORIGINS: "$SERVICE_URL_BABYBUDDY"

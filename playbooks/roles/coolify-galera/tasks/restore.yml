@@ -1,0 +1,27 @@
+---
+# Restore task for inclusion in other playbooks
+#
+# Required variables:
+#   galera_restore_node_config: Node configuration dict
+#   galera_backup_dir: Backup source directory
+#   backup_filename: Backup filename to restore
+
+- name: "Restore: Copy backup to node"
+  ansible.builtin.copy:
+    src: "{{ galera_backup_dir }}/{{ backup_filename }}"
+    dest: "/tmp/{{ backup_filename }}"
+    mode: '0600'
+  delegate_to: "{{ galera_restore_node_config.host }}"
+
+- name: "Restore: Import backup to MariaDB"
+  ansible.builtin.shell: |
+    gunzip -c /tmp/{{ backup_filename }} | \
+    docker exec -i galera-{{ galera_restore_node_config.name }} \
+      mariadb -u root -p{{ galera_root_password }}
+  delegate_to: "{{ galera_restore_node_config.host }}"
+
+- name: "Restore: Cleanup backup file"
+  ansible.builtin.file:
+    path: "/tmp/{{ backup_filename }}"
+    state: absent
+  delegate_to: "{{ galera_restore_node_config.host }}"

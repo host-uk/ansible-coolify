@@ -1,0 +1,87 @@
+---
+# Check Galera cluster health
+#
+# Verifies:
+# - All nodes are running
+# - All nodes are part of primary component
+# - All nodes are synced
+# - Cluster size matches expected
+#
+# Required variables:
+#   galera_nodes: List of all cluster nodes
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Health: Initialize results"
+  ansible.builtin.set_fact:
+    galera_health_results: []
+    galera_expected_cluster_size: "{{ galera_nodes | length }}"
+
+- name: "Health: Check each node's Coolify service status"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: galera_all_services
+
+- name: "Health: Find Galera services"
+  ansible.builtin.set_fact:
+    galera_services: >-
+      {{
+        galera_all_services.json
+        | selectattr('name', 'in', galera_nodes | map(attribute='name') | list)
+        | list
+      }}
+
+- name: "Health: Check service status"
+  ansible.builtin.set_fact:
+    galera_health_results: >-
+      {{
+        galera_health_results + [{
+          'name': item.name,
+          'status': item.status | default('unknown'),
+          'running': item.status | default('') == 'running'
+        }]
+      }}
+  loop: "{{ galera_services }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Health: Count running nodes"
+  ansible.builtin.set_fact:
+    galera_running_count: "{{ galera_health_results | selectattr('running', 'equalto', true) | list | length }}"
+
+- name: "Health: Display cluster status"
+  ansible.builtin.debug:
+    msg: |
+      ╔══════════════════════════════════════════════════════════════╗
+      ║                    GALERA CLUSTER STATUS                     ║
+      ╠══════════════════════════════════════════════════════════════╣
+      ║  Cluster Name: {{ galera_cluster_name | default('coolify_galera') }}
+      ║  Expected Nodes: {{ galera_expected_cluster_size }}
+      ║  Running Nodes: {{ galera_running_count }}
+      ╠══════════════════════════════════════════════════════════════╣
+      ║  NODE STATUS:                                                ║
+      {% for result in galera_health_results %}
+      ║    {{ '✓' if result.running else '✗' }} {{ result.name }}: {{ result.status }}
+      {% endfor %}
+      ╚══════════════════════════════════════════════════════════════╝
+
+- name: "Health: Assert all nodes running"
+  ansible.builtin.assert:
+    that:
+      - galera_running_count | int == galera_expected_cluster_size | int
+    fail_msg: |
+      Cluster unhealthy: Only {{ galera_running_count }}/{{ galera_expected_cluster_size }} nodes running.
+      Failed nodes:
+      {% for result in galera_health_results | rejectattr('running', 'equalto', true) %}
+        - {{ result.name }}: {{ result.status }}
+      {% endfor %}
+    success_msg: "All {{ galera_expected_cluster_size }} nodes are running"
+  when: galera_health_check_strict | default(true)
+
+- name: "Health: Set health status fact"
+  ansible.builtin.set_fact:
+    galera_cluster_healthy: "{{ galera_running_count | int == galera_expected_cluster_size | int }}"

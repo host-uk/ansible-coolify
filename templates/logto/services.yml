@@ -1,0 +1,56 @@
+# Service definition for: logto
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=logto -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: logto
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          logto:
+            image: 'svhd/logto:${TAG-latest}'
+            depends_on:
+              postgres:
+                condition: service_healthy
+            entrypoint:
+              - sh
+              - '-c'
+              - 'npm run cli db seed -- --swe && npm start'
+            environment:
+              - SERVICE_URL_LOGTO
+              - TRUST_PROXY_HEADER=1
+              - 'DB_URL=postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_POSTGRES}@postgres:5432/${POSTGRES_DB:-logto}'
+              - ENDPOINT=$LOGTO_ENDPOINT
+              - ADMIN_ENDPOINT=$LOGTO_ADMIN_ENDPOINT
+            healthcheck:
+              test:
+                - CMD-SHELL
+                - 'exit 0'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+          postgres:
+            image: 'postgres:14-alpine'
+            user: postgres
+            environment:
+              POSTGRES_USER: '${SERVICE_USER_POSTGRES}'
+              POSTGRES_PASSWORD: '${SERVICE_PASSWORD_POSTGRES}'
+              POSTGRES_DB: '${POSTGRES_DB:-logto}'
+            volumes:
+              - 'logto-postgres-data:/var/lib/postgresql/data'
+            healthcheck:
+              test:
+                - CMD
+                - pg_isready
+                - '-U'
+                - $SERVICE_USER_POSTGRES
+                - '-d'
+                - $POSTGRES_DB
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

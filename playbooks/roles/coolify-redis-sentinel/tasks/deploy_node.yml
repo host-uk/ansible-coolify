@@ -1,0 +1,155 @@
+---
+# Deploy a single Redis Sentinel node via Coolify Services API
+#
+# Required variables:
+#   redis_current_node: dict with name, host, ip, role
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Get Coolify servers list"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/servers"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: redis_servers_list
+
+- name: "Find server UUID for node {{ redis_current_node.host }}"
+  ansible.builtin.set_fact:
+    redis_server_uuid: >-
+      {{
+        redis_servers_list.json
+        | selectattr('ip', 'equalto', redis_current_node.ip)
+        | map(attribute='uuid')
+        | first
+        | default('')
+      }}
+
+- name: "Fail if server not registered in Coolify"
+  ansible.builtin.fail:
+    msg: |
+      Server {{ redis_current_node.host }} ({{ redis_current_node.ip }}) not registered in Coolify.
+      Please run the node registration playbook first.
+  when: redis_server_uuid == ''
+
+- name: "Get existing projects"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/projects"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: redis_projects_list
+
+- name: "Find or create Redis project"
+  ansible.builtin.set_fact:
+    redis_project_uuid: >-
+      {{
+        redis_projects_list.json
+        | selectattr('name', 'equalto', redis_project_name)
+        | map(attribute='uuid')
+        | first
+        | default('')
+      }}
+
+- name: "Create Redis project if not exists"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/projects"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ redis_project_name }}"
+      description: "Redis Sentinel High-Availability Cluster"
+    status_code: [200, 201]
+  register: redis_project_create
+  when: redis_project_uuid == ''
+
+- name: "Set project UUID from creation"
+  ansible.builtin.set_fact:
+    redis_project_uuid: "{{ redis_project_create.json.uuid }}"
+  when: redis_project_uuid == ''
+
+- name: "Determine node role settings"
+  ansible.builtin.set_fact:
+    redis_is_master: "{{ redis_current_node.role == 'master' }}"
+    redis_is_sentinel_only: "{{ redis_current_node.role == 'sentinel' }}"
+    redis_node_name: "{{ redis_current_node.name }}"
+    redis_node_ip: "{{ redis_current_node.ip }}"
+
+- name: "Generate sentinel.conf content"
+  ansible.builtin.set_fact:
+    redis_sentinel_conf: "{{ lookup('template', 'sentinel.conf.j2') }}"
+
+- name: "Generate docker-compose content for node"
+  ansible.builtin.set_fact:
+    redis_compose_content: "{{ lookup('template', 'redis-compose.yml.j2') }}"
+
+- name: "Display compose content (debug)"
+  ansible.builtin.debug:
+    msg: "{{ redis_compose_content }}"
+    verbosity: 1
+
+- name: "Check if Redis service already exists"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: redis_existing_services
+
+- name: "Find existing service for this node"
+  ansible.builtin.set_fact:
+    redis_existing_service: >-
+      {{
+        redis_existing_services.json
+        | selectattr('name', 'equalto', redis_current_node.name)
+        | first
+        | default({})
+      }}
+
+- name: "Deploy Redis node as Coolify service"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ redis_current_node.name }}"
+      description: "Redis {{ redis_current_node.role }} node on {{ redis_current_node.host }}"
+      project_uuid: "{{ redis_project_uuid }}"
+      server_uuid: "{{ redis_server_uuid }}"
+      environment_name: "{{ redis_environment_name }}"
+      type: "docker-compose-empty"
+      docker_compose_raw: "{{ redis_compose_content | b64encode }}"
+      instant_deploy: "{{ redis_instant_deploy }}"
+    status_code: [200, 201]
+  register: redis_service_create
+  when: redis_existing_service == {}
+
+- name: "Store service UUID"
+  ansible.builtin.set_fact:
+    redis_service_uuids: >-
+      {{
+        redis_service_uuids | default({})
+        | combine({redis_current_node.name: redis_service_create.json.uuid | default(redis_existing_service.uuid | default(''))})
+      }}
+
+- name: "Display deployment result"
+  ansible.builtin.debug:
+    msg: |
+      Redis node {{ redis_current_node.name }} deployment:
+        Host: {{ redis_current_node.host }}
+        IP: {{ redis_current_node.ip }}
+        Role: {{ redis_current_node.role }}
+        Server UUID: {{ redis_server_uuid }}
+        Service UUID: {{ redis_service_uuids[redis_current_node.name] | default('N/A') }}
+        Is Master: {{ redis_is_master }}
+        Sentinel Only: {{ redis_is_sentinel_only }}
+        Status: {{ 'CREATED' if redis_existing_service == {} else 'ALREADY EXISTS' }}

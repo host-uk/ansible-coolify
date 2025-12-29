@@ -1,0 +1,7 @@
+# Environment variables for grafana
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+GF_SECURITY_ADMIN_PASSWORD: "${SERVICE_PASSWORD_GRAFANA}"
+GF_SERVER_DOMAIN: "${SERVICE_URL_GRAFANA}"
+GF_SERVER_ROOT_URL: "${SERVICE_URL_GRAFANA}"

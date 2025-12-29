@@ -41,6 +41,36 @@ These playbooks are specialized for managing individual resources via the Coolif
 - **Backup Detection** (`playbooks/coolify/`)
     - `backup_check.yml`: Compare local state against live API to detect NEW/MODIFIED/DELETED resources.
 
+- **Galera Cluster** (`playbooks/coolify/galera/`)
+    - `deploy.yml`: Deploy full 4-node MariaDB Galera cluster via Coolify Services.
+    - `status.yml`: Check cluster health and wsrep status.
+    - `recover.yml`: Recover failed nodes or bootstrap from total failure.
+    - `backup.yml`: Create cluster backup using mariadb-dump.
+    - `restore.yml`: Restore cluster from backup.
+    - `maintenance/rolling_upgrade.yml`: Rolling MariaDB version upgrade.
+
+- **Redis Sentinel Cluster** (`playbooks/coolify/redis/`)
+    - `deploy.yml`: Deploy Redis Sentinel cluster with automatic failover.
+    - `status.yml`: Check cluster health and replication status.
+    - `backup.yml`: Create RDB snapshot backup.
+    - `failover.yml`: Trigger manual Sentinel failover.
+
+- **PostgreSQL Patroni Cluster** (`playbooks/coolify/postgresql/`)
+    - `deploy.yml`: Deploy PostgreSQL Patroni cluster with etcd.
+    - `status.yml`: Check cluster health and leader status.
+    - `backup.yml`: Create pg_dump backup from replica.
+    - `switchover.yml`: Planned switchover to different node.
+
+- **One-Click Apps** (`playbooks/coolify/oneclick/`)
+    - `deploy.yml`: Deploy one-click app with auto-detected database configuration.
+    - `list.yml`: List available one-click apps with database requirements.
+    - `detect.yml`: Detect database requirements for a service type.
+
+- **Cluster Orchestration** (`playbooks/coolify/cluster/`)
+    - `deploy.yml`: Deploy complete shared infrastructure (Galera + Redis + PostgreSQL).
+    - `status.yml`: Check status of all clusters.
+    - `backup.yml`: Backup all clusters.
+
 #### Running Playbooks
 
 It is recommended to run playbooks via the `Makefile` to ensure correct inventory and environment variable handling.

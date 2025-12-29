@@ -1,0 +1,79 @@
+---
+# Redis Sentinel Cluster Configuration
+redis_cluster_name: "coolify_redis"
+redis_master_name: "mymaster"
+
+# Redis Image Configuration
+redis_version: "7.4"
+redis_image: "redis:{{ redis_version }}-alpine"
+
+# Authentication
+redis_password: "{{ lookup('password', 'state/redis/password.txt length=32 chars=ascii_letters,digits') }}"
+
+# Service Discovery Hostname
+# All nodes resolve this to their local Redis container
+redis_hostname: "cache.host.uk.com"
+redis_port: 6379
+redis_sentinel_port: 26379
+
+# Sentinel Configuration
+redis_sentinel_quorum: 2
+redis_sentinel_down_after_ms: 5000
+redis_sentinel_failover_timeout: 60000
+redis_sentinel_parallel_syncs: 1
+
+# Node Configuration
+# Override in inventory or playbook vars for your environment
+redis_nodes:
+  - name: "redis-node-1"
+    host: "app-server-1.lan"
+    ip: "172.28.0.20"
+    role: "master"
+
+  - name: "redis-node-2"
+    host: "app-server-2.lan"
+    ip: "172.28.0.21"
+    role: "replica"
+
+  - name: "redis-node-3"
+    host: "controller.lan"
+    ip: "172.28.0.10"
+    role: "replica"
+
+  - name: "redis-node-4"
+    host: "builder.lan"
+    ip: "172.28.0.30"
+    role: "sentinel"
+
+# Coolify Integration
+redis_project_name: "redis-cluster"
+redis_environment_name: "production"
+redis_instant_deploy: true
+
+# Resource Limits
+redis_memory_limit: "1g"
+redis_cpu_limit: "1"
+redis_maxmemory: "768mb"
+redis_maxmemory_policy: "allkeys-lru"
+
+# Timeouts
+redis_health_check_interval: 10
+redis_health_check_timeout: 5
+redis_health_check_retries: 5
+redis_health_check_start_period: 30
+
+# Master node computed from nodes list
+redis_master_node: "{{ redis_nodes | selectattr('role', 'equalto', 'master') | first }}"
+redis_master_ip: "{{ redis_master_node.ip }}"
+
+# Bootstrap settings
+redis_is_master: false
+redis_is_sentinel_only: false
+
+# Backup settings
+redis_backup_dir: "state/redis/backups"
+redis_backup_retention_days: 7
+
+# Persistence
+redis_appendonly: "yes"
+redis_save_intervals: "900 1 300 10 60 10000"

@@ -1,0 +1,80 @@
+---
+# Configure /etc/hosts on all Galera nodes
+#
+# Adds:
+# - db.host.uk.com -> local node IP (for service discovery)
+# - All Galera node hostnames -> IPs (for cluster communication)
+#
+# Required variables:
+#   galera_nodes: List of all cluster nodes
+#   galera_hostname: Service discovery hostname (default: db.host.uk.com)
+
+- name: "Hosts: Display configuration"
+  ansible.builtin.debug:
+    msg: |
+      Configuring /etc/hosts on all nodes:
+        Service hostname: {{ galera_hostname }}
+        Nodes to configure:
+      {% for node in galera_nodes %}
+          - {{ node.host }} ({{ node.ip }})
+      {% endfor %}
+
+- name: "Hosts: Add Galera node entries to each host"
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: ".*{{ inner_node.name }}$"
+    line: "{{ inner_node.ip }} {{ inner_node.name }}"
+    state: present
+  delegate_to: "{{ outer_node.host }}"
+  loop: "{{ galera_nodes }}"
+  loop_control:
+    loop_var: outer_node
+    label: "{{ outer_node.host }}"
+  vars:
+    inner_nodes: "{{ galera_nodes }}"
+  with_nested:
+    - "{{ galera_nodes }}"
+    - "{{ galera_nodes }}"
+  when: false  # Disabled - using simplified approach below
+
+# Simplified approach: Configure each host with all node IPs
+- name: "Hosts: Configure node entries on {{ item.0.host }}"
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} GALERA CLUSTER NODES"
+    block: |
+      {% for node in galera_nodes %}
+      {{ node.ip }} {{ node.name }}
+      {% endfor %}
+    state: present
+  delegate_to: "{{ item.host }}"
+  loop: "{{ galera_nodes }}"
+  loop_control:
+    label: "{{ item.host }}"
+  ignore_errors: true  # May fail if host not accessible
+
+- name: "Hosts: Add service hostname to each host"
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: ".*{{ galera_hostname }}$"
+    line: "{{ item.ip }} {{ galera_hostname }}"
+    state: present
+  delegate_to: "{{ item.host }}"
+  loop: "{{ galera_nodes }}"
+  loop_control:
+    label: "{{ item.host }}: {{ galera_hostname }} -> {{ item.ip }}"
+  ignore_errors: true
+
+- name: "Hosts: Configuration complete"
+  ansible.builtin.debug:
+    msg: |
+      Host configuration complete.
+      Each node now resolves:
+        - {{ galera_hostname }} -> local Galera container IP
+        - All galera-node-* hostnames -> respective IPs
+
+      Applications can connect using:
+        Host: {{ galera_hostname }}
+        Port: {{ galera_port }}
+        Database: {{ galera_app_database }}
+        User: {{ galera_app_user }}

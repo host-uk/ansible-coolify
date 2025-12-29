@@ -1,0 +1,22 @@
+# Environment variables for penpot
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+PENPOT_BACKEND_FLAGS: "enable-login-with-password enable-smtp"
+PENPOT_DATABASE_PASSWORD: "${SERVICE_PASSWORD_POSTGRES}"
+PENPOT_DATABASE_USERNAME: "${SERVICE_USER_POSTGRES}"
+PENPOT_FRONTEND_FLAGS: "enable-login-with-password"
+PENPOT_PUBLIC_URI: "$SERVICE_URL_FRONTEND_8080"
+PENPOT_SECRET_KEY: "$SERVICE_REALBASE64_64_PENPOT"
+PENPOT_SMTP_DEFAULT_FROM: "no-reply@example.com"
+PENPOT_SMTP_DEFAULT_REPLY_TO: "no-reply@example.com"
+PENPOT_SMTP_HOST: "mailpit"
+PENPOT_SMTP_PASSWORD: "penpot"
+PENPOT_SMTP_PORT: "1025"
+PENPOT_SMTP_SSL: "false"
+PENPOT_SMTP_TLS: "false"
+PENPOT_SMTP_USERNAME: "penpot"
+PENPOT_TELEMETRY_ENABLED: "false"
+POSTGRES_DB: "penpot"
+POSTGRES_PASSWORD: "$SERVICE_PASSWORD_POSTGRES"
+POSTGRES_USER: "$SERVICE_USER_POSTGRES"

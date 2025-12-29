@@ -1,0 +1,74 @@
+---
+# Galera Cluster Configuration
+galera_cluster_name: "coolify_galera"
+galera_sst_method: "mariabackup"
+galera_sst_user: "sst_user"
+galera_sst_password: "{{ lookup('password', 'state/galera/sst_password.txt length=32 chars=ascii_letters,digits') }}"
+
+# MariaDB Configuration
+galera_mariadb_version: "11.4"
+galera_mariadb_image: "mariadb:{{ galera_mariadb_version }}"
+galera_root_password: "{{ lookup('password', 'state/galera/root_password.txt length=32 chars=ascii_letters,digits') }}"
+galera_app_database: "application"
+galera_app_user: "app_user"
+galera_app_password: "{{ lookup('password', 'state/galera/app_password.txt length=32 chars=ascii_letters,digits') }}"
+
+# Service Discovery Hostname
+# All nodes resolve this to their local Galera container
+galera_hostname: "db.host.uk.com"
+galera_port: 3306
+
+# Node Configuration
+# Override in inventory or playbook vars for your environment
+galera_nodes:
+  - name: "galera-node-1"
+    host: "app-server-1.lan"
+    ip: "172.28.0.20"
+    role: "master"
+
+  - name: "galera-node-2"
+    host: "app-server-2.lan"
+    ip: "172.28.0.21"
+    role: "master"
+
+  - name: "galera-node-3"
+    host: "controller.lan"
+    ip: "172.28.0.10"
+    role: "slave"
+
+  - name: "galera-node-4"
+    host: "builder.lan"
+    ip: "172.28.0.30"
+    role: "slave"
+
+# Coolify Integration
+galera_project_name: "galera-cluster"
+galera_environment_name: "production"
+galera_instant_deploy: true
+
+# Resource Limits
+galera_memory_limit: "2g"
+galera_cpu_limit: "2"
+
+# Galera Ports
+galera_mysql_port: 3306
+galera_galera_port: 4567
+galera_ist_port: 4568
+galera_sst_port: 4444
+
+# Timeouts
+galera_health_check_interval: 10
+galera_health_check_timeout: 5
+galera_health_check_retries: 5
+galera_health_check_start_period: 60
+
+# Cluster address computed from nodes
+galera_cluster_address: "gcomm://{{ galera_nodes | map(attribute='ip') | join(',') }}"
+
+# Bootstrap settings
+galera_bootstrap_node: false
+galera_is_initial_deploy: false
+
+# Backup settings
+galera_backup_dir: "state/galera/backups"
+galera_backup_retention_days: 7

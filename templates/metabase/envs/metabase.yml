@@ -1,0 +1,9 @@
+# Environment variables for metabase
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+MB_DB_PASS: "$SERVICE_PASSWORD_POSTGRESQL"
+MB_DB_USER: "$SERVICE_USER_POSTGRESQL"
+POSTGRES_PASSWORD: "${SERVICE_PASSWORD_POSTGRESQL}"
+POSTGRES_USER: "${SERVICE_USER_POSTGRESQL}"
+POSTGRESQL_DATABASE: "metabase"

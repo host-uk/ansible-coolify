@@ -1,0 +1,94 @@
+---
+# List Available One-Click Services
+#
+# This playbook displays all available Coolify one-click services
+# and their database requirements.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/oneclick/list.yml
+
+- name: List Available One-Click Services
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Load database mappings
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../roles/coolify-oneclick-app/vars/database_mappings.yml"
+
+    - name: Display PostgreSQL services
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    POSTGRESQL-BASED SERVICES ({{ postgresql_services | length }})
+          ====================================================================
+          These services require PostgreSQL and will be configured to use
+          the shared PostgreSQL Patroni cluster.
+
+          {% for svc in postgresql_services | sort %}
+            - {{ svc }}{% if svc in redis_required_services %} (+ Redis){% endif %}
+
+          {% endfor %}
+
+    - name: Display MariaDB services
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    MARIADB-BASED SERVICES ({{ mariadb_services | length }})
+          ====================================================================
+          These services require MariaDB/MySQL and will be configured to use
+          the shared Galera cluster.
+
+          {% for svc in mariadb_services | sort %}
+            - {{ svc }}{% if svc in redis_required_services %} (+ Redis){% endif %}
+
+          {% endfor %}
+
+    - name: Display Redis-required services
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    REDIS-REQUIRED SERVICES ({{ redis_required_services | length }})
+          ====================================================================
+          These services require Redis for caching/queues and will be configured
+          to use the shared Redis Sentinel cluster.
+
+          {% for svc in redis_required_services | sort %}
+            - {{ svc }}
+          {% endfor %}
+
+    - name: Display standalone services
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    STANDALONE SERVICES ({{ standalone_services | length }})
+          ====================================================================
+          These services do not require external databases and can be deployed
+          without shared infrastructure configuration.
+
+          {% for svc in standalone_services | sort %}
+            - {{ svc }}
+          {% endfor %}
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SUMMARY
+          ====================================================================
+            PostgreSQL Services: {{ postgresql_services | length }}
+            MariaDB Services: {{ mariadb_services | length }}
+            Redis-Required Services: {{ redis_required_services | length }}
+            Standalone Services: {{ standalone_services | length }}
+            --------------------------------------------------
+            Total Mapped Services: {{ postgresql_services | length + mariadb_services | length + standalone_services | length }}
+
+            To deploy a service:
+              make dev-oneclick-deploy APP=<service_type> NAME=<app_name>
+
+            Example:
+              make dev-oneclick-deploy APP=chatwoot NAME=my-chatwoot
+              make dev-oneclick-deploy APP=n8n NAME=automation
+              make dev-oneclick-deploy APP=uptime-kuma NAME=monitoring
+          ====================================================================

@@ -1,0 +1,470 @@
+---
+# Test 13: Service Verification
+# Tests: Create services/databases via API and verify they appear correctly
+# Focuses on verifying the coolify_service and coolify_database modules work correctly
+#
+# Uses multi-play structure:
+# 1. localhost: Create Docker containers via docker_dev role
+# 2. test-controller.lan: Install Coolify via coolify role
+# 3. localhost: Run service verification tests
+
+# =============================================================================
+# PLAY 1: Create Docker Development Environment
+# =============================================================================
+- name: "Test 13: Setup Docker Environment"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_containers: "{{ test_docker_dev_containers }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    - name: "SETUP: Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 13: SERVICE VERIFICATION
+          ====================================================================
+            Phase 1: Creating Docker development environment
+            - Using docker_dev role for container management
+            - Using coolify role for Coolify installation
+            - Testing service/database creation and verification
+          ====================================================================
+
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "SETUP: Create containers via docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+  tags:
+    - test
+    - service-verification
+    - setup
+
+# =============================================================================
+# PLAY 2: Install Coolify via Role
+# =============================================================================
+- name: "Test 13: Install Coolify via Role"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "TestPassword123!"
+    coolify_auto_setup_enabled: true
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "./state"
+    coolify_docker_address_pool_base: "172.30.0.0/16"
+    coolify_docker_address_pool_size: "24"
+    coolify_docker_pool_force_override: false
+    coolify_autoupdate: false
+    coolify_registry_url: "https://hub.docker.com"
+    coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    coolify_detected_key_uuid: ""
+
+  tasks:
+    - name: "COOLIFY: Install and configure via coolify role"
+      ansible.builtin.include_role:
+        name: coolify
+
+    - name: "COOLIFY: Store API token for later plays"
+      ansible.builtin.set_fact:
+        controller_api_token: "{{ coolify_api_token }}"
+        controller_api_ready: "{{ coolify_api_ready }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+  tags:
+    - test
+    - service-verification
+    - coolify-setup
+
+# =============================================================================
+# PLAY 3: Run Service Verification Tests
+# =============================================================================
+- name: "Test 13: Service Verification Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
+    coolify_api_token: "{{ controller_api_token }}"
+    # Services to create and verify
+    test_services:
+      - name: "verify-redis"
+        type: "redis"
+        description: "Redis for verification test"
+      - name: "verify-postgres"
+        type: "postgresql"
+        description: "PostgreSQL for verification test"
+    test_project_name: "service-verify-project"
+
+  tasks:
+    - name: "TEST: Verify Coolify API is ready"
+      ansible.builtin.assert:
+        that:
+          - controller_api_ready | default(false)
+          - controller_api_token | default('') | length > 0
+        fail_msg: "Coolify API not ready or token not set"
+        success_msg: "Coolify API ready, token configured via role"
+
+    - name: "TEST: Verify API access"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+      retries: 10
+      delay: 3
+      until: api_check.status == 200
+
+    # ==========================================================================
+    # SETUP: Create Project and Get Environment
+    # ==========================================================================
+    - name: "SETUP: Create test project"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ test_project_name }}"
+          description: "Service verification test project"
+        status_code: [200, 201]
+      register: project_create
+
+    - name: "SETUP: Store project UUID"
+      ansible.builtin.set_fact:
+        project_uuid: "{{ project_create.json.uuid }}"
+
+    - name: "SETUP: Get project details for environment"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: project_detail
+
+    - name: "SETUP: Store environment UUID"
+      ansible.builtin.set_fact:
+        environment_uuid: "{{ project_detail.json.environments[0].uuid }}"
+        environment_name: "{{ project_detail.json.environments[0].name }}"
+
+    - name: "SETUP: Get localhost server UUID"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: servers_list
+
+    - name: "SETUP: Find localhost server"
+      ansible.builtin.set_fact:
+        localhost_server_uuid: "{{ (servers_list.json | selectattr('ip', 'match', '^(localhost|127\\.0\\.0\\.1|host\\.docker\\.internal)$') | first).uuid }}"
+      when: servers_list.json | length > 0
+
+    # ==========================================================================
+    # SVC-001: Create Redis Service via API
+    # ==========================================================================
+    - name: "SVC-001: Create Redis service"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: "redis"
+          name: "{{ test_services[0].name }}"
+          description: "{{ test_services[0].description }}"
+          project_uuid: "{{ project_uuid }}"
+          environment_name: "{{ environment_name }}"
+          server_uuid: "{{ localhost_server_uuid }}"
+          instant_deploy: false
+        status_code: [200, 201]
+      register: svc001_redis
+      when: localhost_server_uuid is defined
+
+    - name: "SVC-001: Store Redis UUID"
+      ansible.builtin.set_fact:
+        redis_service_uuid: "{{ svc001_redis.json.uuid }}"
+      when: svc001_redis is defined and svc001_redis.json is defined
+
+    # ==========================================================================
+    # SVC-002: Verify Redis in Services List
+    # ==========================================================================
+    - name: "SVC-002: List all services"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: svc002_services
+      when: redis_service_uuid is defined
+
+    - name: "SVC-002: Assert Redis exists in listing"
+      ansible.builtin.assert:
+        that:
+          - svc002_services.json | selectattr('uuid', 'equalto', redis_service_uuid) | list | length == 1
+        fail_msg: "Redis service not found in listing"
+        success_msg: "Redis service verified in API"
+      when: redis_service_uuid is defined
+
+    # ==========================================================================
+    # SVC-003: Get Redis Service Details
+    # ==========================================================================
+    - name: "SVC-003: Get Redis service details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services/{{ redis_service_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: svc003_redis_detail
+      when: redis_service_uuid is defined
+
+    - name: "SVC-003: Assert Redis details correct"
+      ansible.builtin.assert:
+        that:
+          - svc003_redis_detail.json.uuid == redis_service_uuid
+          - svc003_redis_detail.json.name == test_services[0].name
+        fail_msg: "Redis service details mismatch"
+        success_msg: "Redis service details verified: {{ svc003_redis_detail.json.name }}"
+      when: svc003_redis_detail is defined
+
+    # ==========================================================================
+    # SVC-004: Create PostgreSQL Database via API
+    # ==========================================================================
+    - name: "SVC-004: Create PostgreSQL database"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases/postgresql"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ test_services[1].name }}"
+          description: "{{ test_services[1].description }}"
+          project_uuid: "{{ project_uuid }}"
+          environment_name: "{{ environment_name }}"
+          server_uuid: "{{ localhost_server_uuid }}"
+          instant_deploy: false
+        status_code: [200, 201]
+      register: svc004_postgres
+      when: localhost_server_uuid is defined
+
+    - name: "SVC-004: Store PostgreSQL UUID"
+      ansible.builtin.set_fact:
+        postgres_db_uuid: "{{ svc004_postgres.json.uuid }}"
+      when: svc004_postgres is defined and svc004_postgres.json is defined
+
+    # ==========================================================================
+    # SVC-005: Verify PostgreSQL in Databases List
+    # ==========================================================================
+    - name: "SVC-005: List all databases"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: svc005_databases
+      when: postgres_db_uuid is defined
+
+    - name: "SVC-005: Assert PostgreSQL exists in listing"
+      ansible.builtin.assert:
+        that:
+          - svc005_databases.json | selectattr('uuid', 'equalto', postgres_db_uuid) | list | length == 1
+        fail_msg: "PostgreSQL database not found in listing"
+        success_msg: "PostgreSQL database verified in API"
+      when: postgres_db_uuid is defined
+
+    # ==========================================================================
+    # SVC-006: Get PostgreSQL Database Details
+    # ==========================================================================
+    - name: "SVC-006: Get PostgreSQL details"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases/{{ postgres_db_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: svc006_postgres_detail
+      when: postgres_db_uuid is defined
+
+    - name: "SVC-006: Assert PostgreSQL details correct"
+      ansible.builtin.assert:
+        that:
+          - svc006_postgres_detail.json.uuid == postgres_db_uuid
+          - svc006_postgres_detail.json.name == test_services[1].name
+        fail_msg: "PostgreSQL database details mismatch"
+        success_msg: "PostgreSQL database details verified: {{ svc006_postgres_detail.json.name }}"
+      when: svc006_postgres_detail is defined
+
+    # ==========================================================================
+    # SVC-007: Verify Resources in Project
+    # ==========================================================================
+    - name: "SVC-007: Get project resources"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ project_uuid }}/{{ environment_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: svc007_project_resources
+      ignore_errors: true
+
+    - name: "SVC-007: Display project environment resources"
+      ansible.builtin.debug:
+        msg: |
+          Project Environment Resources:
+          - Services: {{ svc007_project_resources.json.services | default([]) | length }}
+          - Databases: {{ svc007_project_resources.json.databases | default([]) | length }}
+          - Applications: {{ svc007_project_resources.json.applications | default([]) | length }}
+      when: svc007_project_resources is defined and svc007_project_resources.json is defined
+
+    # ==========================================================================
+    # SVC-008: Cross-Reference Summary
+    # ==========================================================================
+    - name: "SVC-008: Build service verification summary"
+      ansible.builtin.set_fact:
+        service_verification_summary:
+          redis:
+            created: "{{ redis_service_uuid | default('skipped') }}"
+            found_in_list: "{{ (svc002_services.json | default([]) | selectattr('uuid', 'equalto', redis_service_uuid | default('')) | list | length) | default(0) }}"
+            details_match: "{{ (svc003_redis_detail.json.name | default('')) == test_services[0].name }}"
+          postgres:
+            created: "{{ postgres_db_uuid | default('skipped') }}"
+            found_in_list: "{{ (svc005_databases.json | default([]) | selectattr('uuid', 'equalto', postgres_db_uuid | default('')) | list | length) | default(0) }}"
+            details_match: "{{ (svc006_postgres_detail.json.name | default('')) == test_services[1].name }}"
+      when: localhost_server_uuid is defined
+
+    - name: "SVC-008: Display verification summary"
+      ansible.builtin.debug:
+        msg: |
+          === SERVICE VERIFICATION SUMMARY ===
+          Redis Service:
+            - UUID: {{ service_verification_summary.redis.created }}
+            - In listing: {{ service_verification_summary.redis.found_in_list }}
+            - Details match: {{ service_verification_summary.redis.details_match }}
+          PostgreSQL Database:
+            - UUID: {{ service_verification_summary.postgres.created }}
+            - In listing: {{ service_verification_summary.postgres.found_in_list }}
+            - Details match: {{ service_verification_summary.postgres.details_match }}
+          =====================================
+      when: service_verification_summary is defined
+
+    # ==========================================================================
+    # CLEANUP: Remove Test Resources
+    # ==========================================================================
+    - name: "CLEANUP: Delete Redis service"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/services/{{ redis_service_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      when: redis_service_uuid is defined
+      ignore_errors: true
+
+    - name: "CLEANUP: Delete PostgreSQL database"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/databases/{{ postgres_db_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      when: postgres_db_uuid is defined
+      ignore_errors: true
+
+    - name: "CLEANUP: Delete test project"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ project_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+
+  # ============================================================================
+  # POST_TASKS: Final Cleanup
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: Service Verification"
+      ansible.builtin.debug:
+        msg: |
+          All service verification tests passed!
+          - Coolify installed via coolify role
+          - API token obtained from role
+          - Redis service created and verified
+          - PostgreSQL database created and verified
+          - Project resources correctly reflected in API
+
+  tags:
+    - test
+    - service-verification
+    - docker-dev

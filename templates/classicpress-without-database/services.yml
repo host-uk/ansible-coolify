@@ -1,0 +1,29 @@
+# Service definition for: classicpress-without-database
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=classicpress-without-database -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: classicpress-without-database
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          classicpress:
+            image: 'classicpress/classicpress:latest'
+            volumes:
+              - 'classicpress-files:/var/www/html'
+            environment:
+              - SERVICE_URL_CLASSICPRESS
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1'
+              interval: 2s
+              timeout: 10s
+              retries: 10
+

@@ -1,0 +1,37 @@
+# Service definition for: vikunja
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=vikunja -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: vikunja
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          vikunja:
+            image: vikunja/vikunja
+            environment:
+              - SERVICE_URL_VIKUNJA
+              - VIKUNJA_SERVICE_PUBLICURL=$SERVICE_URL_VIKUNJA
+              - VIKUNJA_SERVICE_JWTSECRET=$SERVICE_PASSWORD_JWTSECRET
+              - VIKUNJA_SERVICE_ENABLEREGISTRATION=true
+              - VIKUNJA_DATABASE_PATH=/db/vikunja.db
+              - VIKUNJA_DATABASE_TYPE=sqlite
+            volumes:
+              - 'vikunja-data:/app/vikunja/'
+              - 'vikunja-sqlite-data:/db'
+            depends_on:
+              - init
+          init:
+            image: busybox
+            restart: 'no'
+            volumes:
+              - 'vikunja-sqlite-data:/db'
+            command:
+              - sh
+              - '-c'
+              - 'touch /db/vikunja.db && chown -R 1000 /db'
+

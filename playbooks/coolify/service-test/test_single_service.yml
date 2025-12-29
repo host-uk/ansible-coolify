@@ -1,0 +1,37 @@
+---
+# Test Single Service (included by test_all.yml)
+# Wrapper that runs test_service.yml and captures results
+#
+# Expects:
+#   current_service: Service name to test
+
+- name: "TEST: {{ current_service }}"
+  block:
+    - name: "{{ current_service }}: Run service test"
+      ansible.builtin.command:
+        cmd: >-
+          ansible-playbook
+          {{ playbook_dir }}/test_service.yml
+          -e service_name={{ current_service }}
+          -e coolify_api_url={{ coolify_api_url }}
+          -e coolify_api_token={{ coolify_api_token }}
+          -e cleanup_after=true
+      register: test_run
+      changed_when: true
+      ignore_errors: true
+
+    - name: "{{ current_service }}: Record success"
+      ansible.builtin.set_fact:
+        passed_services: "{{ passed_services + [current_service] }}"
+        test_results: "{{ test_results + [{'service': current_service, 'status': 'passed'}] }}"
+      when: test_run.rc == 0
+
+    - name: "{{ current_service }}: Record failure"
+      ansible.builtin.set_fact:
+        failed_services: "{{ failed_services + [current_service] }}"
+        test_results: "{{ test_results + [{'service': current_service, 'status': 'failed'}] }}"
+      when: test_run.rc != 0
+
+    - name: "{{ current_service }}: Display result"
+      ansible.builtin.debug:
+        msg: "{{ current_service }}: {{ 'PASSED' if test_run.rc == 0 else 'FAILED' }}"

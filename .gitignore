@@ -13,4 +13,8 @@ ansible-cloudns-master/
 **/docker-dev-logs/
 **/docker-test-logs/
 __pycache__/
-templates/
+
+# Local env files with secrets
+.env.local
+.env.*.local
+*.local.env

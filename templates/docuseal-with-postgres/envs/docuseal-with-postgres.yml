@@ -1,0 +1,8 @@
+# Environment variables for docuseal-with-postgres
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+HOST: "${SERVICE_URL_DOCUSEAL}"
+POSTGRES_DB: "docuseal"
+POSTGRES_PASSWORD: "$SERVICE_PASSWORD_POSTGRES"
+POSTGRES_USER: "$SERVICE_USER_POSTGRES"

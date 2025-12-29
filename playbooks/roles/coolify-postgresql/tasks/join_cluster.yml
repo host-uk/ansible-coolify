@@ -1,0 +1,51 @@
+---
+# Join replica nodes to the PostgreSQL Patroni cluster
+# Must be run after bootstrap_cluster.yml
+#
+# Required variables:
+#   postgresql_nodes: List of all cluster nodes
+#   postgresql_primary_ip: IP of the primary node (set by bootstrap)
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Identify replica nodes"
+  ansible.builtin.set_fact:
+    postgresql_replica_nodes: "{{ postgresql_nodes | rejectattr('role', 'equalto', 'primary') | list }}"
+
+- name: "Deploy replica nodes sequentially"
+  ansible.builtin.include_tasks: deploy_node.yml
+  vars:
+    postgresql_current_node: "{{ item }}"
+  loop: "{{ postgresql_replica_nodes }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.role }})"
+    pause: 15
+
+- name: "Wait for all replica services to be deployed"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ postgresql_service_uuids[item.name] }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: postgresql_replica_status
+  retries: 30
+  delay: 10
+  until: >
+    postgresql_replica_status.json.status is defined and
+    postgresql_replica_status.json.status in ['running', 'healthy']
+  loop: "{{ postgresql_replica_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: postgresql_service_uuids[item.name] is defined
+
+- name: "Display cluster join summary"
+  ansible.builtin.debug:
+    msg: |
+      PostgreSQL Patroni Cluster Join Complete:
+        Primary: {{ postgresql_primary_node.name }} ({{ postgresql_primary_ip }})
+        Replicas joined:
+      {% for node in postgresql_replica_nodes %}
+          - {{ node.name }} ({{ node.ip }}) - {{ node.role }}
+      {% endfor %}
+        Total nodes: {{ postgresql_nodes | length }}

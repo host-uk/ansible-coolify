@@ -1,0 +1,137 @@
+---
+# Backup PostgreSQL Patroni Cluster
+#
+# This playbook creates a backup of the PostgreSQL database from the primary node.
+# Uses pg_basebackup for physical backups or pg_dump for logical backups.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/postgresql/backup.yml
+#   ansible-playbook -i inventory/ playbooks/coolify/postgresql/backup.yml -e backup_type=logical
+
+- name: Backup PostgreSQL Patroni Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+  vars:
+    backup_type: "logical"  # logical (pg_dump) or physical (pg_basebackup)
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include PostgreSQL Patroni role defaults
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: main.yml
+
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ postgresql_backup_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+
+    - name: Set backup filename
+      ansible.builtin.set_fact:
+        postgresql_backup_filename: "postgresql-{{ backup_type }}-{{ ansible_date_time.date }}-{{ ansible_date_time.epoch }}"
+
+    - name: Create logical backup (pg_dump)
+      ansible.builtin.command:
+        cmd: >
+          docker exec patroni-{{ postgresql_primary_node.name }}
+          pg_dump -U {{ postgresql_superuser }} -Fc {{ postgresql_app_database }}
+      register: postgresql_dump
+      changed_when: true
+      delegate_to: "{{ postgresql_primary_node.host }}"
+      environment:
+        PGPASSWORD: "{{ postgresql_superuser_password }}"
+      no_log: true
+      when: backup_type == "logical"
+
+    - name: Save logical backup to container
+      ansible.builtin.command:
+        cmd: >
+          docker exec patroni-{{ postgresql_primary_node.name }}
+          pg_dump -U {{ postgresql_superuser }} -Fc {{ postgresql_app_database }}
+          -f /tmp/{{ postgresql_backup_filename }}.dump
+      changed_when: true
+      delegate_to: "{{ postgresql_primary_node.host }}"
+      environment:
+        PGPASSWORD: "{{ postgresql_superuser_password }}"
+      no_log: true
+      when: backup_type == "logical"
+
+    - name: Copy backup from container
+      ansible.builtin.command:
+        cmd: >
+          docker cp patroni-{{ postgresql_primary_node.name }}:/tmp/{{ postgresql_backup_filename }}.dump
+          /tmp/{{ postgresql_backup_filename }}.dump
+      delegate_to: "{{ postgresql_primary_node.host }}"
+      changed_when: true
+      when: backup_type == "logical"
+
+    - name: Compress backup
+      ansible.builtin.command:
+        cmd: gzip -f /tmp/{{ postgresql_backup_filename }}.dump
+      delegate_to: "{{ postgresql_primary_node.host }}"
+      changed_when: true
+      when: backup_type == "logical"
+
+    - name: Fetch backup to control machine
+      ansible.builtin.fetch:
+        src: "/tmp/{{ postgresql_backup_filename }}.dump.gz"
+        dest: "{{ postgresql_backup_dir }}/{{ postgresql_backup_filename }}.dump.gz"
+        flat: true
+      delegate_to: "{{ postgresql_primary_node.host }}"
+      when: backup_type == "logical"
+
+    - name: Clean up temporary backup file
+      ansible.builtin.file:
+        path: "/tmp/{{ postgresql_backup_filename }}.dump.gz"
+        state: absent
+      delegate_to: "{{ postgresql_primary_node.host }}"
+
+    - name: Clean up container backup file
+      ansible.builtin.command:
+        cmd: >
+          docker exec patroni-{{ postgresql_primary_node.name }}
+          rm -f /tmp/{{ postgresql_backup_filename }}.dump
+      delegate_to: "{{ postgresql_primary_node.host }}"
+      changed_when: true
+      ignore_errors: true
+      when: backup_type == "logical"
+
+    - name: Remove old backups
+      ansible.builtin.find:
+        paths: "{{ postgresql_backup_dir }}"
+        patterns: "postgresql-*.dump.gz"
+        age: "{{ postgresql_backup_retention_days }}d"
+      register: postgresql_old_backups
+      delegate_to: localhost
+
+    - name: Delete old backup files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ postgresql_old_backups.files }}"
+      delegate_to: localhost
+      when: postgresql_old_backups.files | length > 0
+
+    - name: Display backup summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    POSTGRESQL BACKUP COMPLETE
+          ====================================================================
+            Backup Details:
+              Source: {{ postgresql_primary_node.name }} ({{ postgresql_primary_node.ip }})
+              Type: {{ backup_type }}
+              Database: {{ postgresql_app_database }}
+              Filename: {{ postgresql_backup_filename }}.dump.gz
+              Location: {{ postgresql_backup_dir }}/{{ postgresql_backup_filename }}.dump.gz
+
+            Retention: {{ postgresql_backup_retention_days }} days
+            Old backups removed: {{ postgresql_old_backups.files | length }}
+          ====================================================================

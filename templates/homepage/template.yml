@@ -1,0 +1,9 @@
+# Template: homepage
+# Auto-generated from service test
+# Date: 2025-12-29T04:17:13+00:00
+
+name: homepage
+service_type: homepage
+source: automated-test
+tested: true
+test_date: 2025-12-29T04:17:13+00:00

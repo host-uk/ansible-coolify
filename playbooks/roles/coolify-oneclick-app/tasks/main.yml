@@ -1,0 +1,57 @@
+---
+# Coolify One-Click App Role - Main Entry Point
+#
+# This role deploys Coolify one-click services and automatically
+# configures them to use shared infrastructure (Galera, Redis, PostgreSQL).
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/oneclick/deploy.yml \
+#     -e oneclick_service_type=chatwoot \
+#     -e oneclick_app_name=my-chatwoot
+#
+# Variables:
+#   oneclick_service_type: Type of service (chatwoot, n8n, ghost, etc.)
+#   oneclick_app_name: Unique name for the app instance
+#   oneclick_auto_detect_database: Auto-detect database requirements (default: true)
+#
+# The role can be included with specific task files:
+#   tasks_from: detect_database.yml      - Detect database requirements
+#   tasks_from: configure_postgresql.yml - Create PostgreSQL database
+#   tasks_from: configure_mariadb.yml    - Create MariaDB database
+#   tasks_from: configure_redis.yml      - Configure Redis connection
+#   tasks_from: deploy.yml               - Deploy via Coolify API
+
+- name: Load database mappings
+  ansible.builtin.include_vars:
+    file: database_mappings.yml
+
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - oneclick_service_type | length > 0
+      - oneclick_app_name | length > 0
+    fail_msg: "Both oneclick_service_type and oneclick_app_name are required"
+    success_msg: "Deploying {{ oneclick_service_type }} as {{ oneclick_app_name }}"
+
+- name: Ensure One-Click state directory exists
+  ansible.builtin.file:
+    path: "state/oneclick/{{ oneclick_app_name }}"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+
+- name: Display One-Click app configuration
+  ansible.builtin.debug:
+    msg: |
+      One-Click App Deployment:
+        Service Type: {{ oneclick_service_type }}
+        App Name: {{ oneclick_app_name }}
+        Project: {{ oneclick_project_name }}
+        Environment: {{ oneclick_environment_name }}
+
+        Shared Infrastructure:
+          MariaDB: {{ shared_mariadb_hostname }}:{{ shared_mariadb_port }}
+          PostgreSQL: {{ shared_postgresql_hostname }}:{{ shared_postgresql_port }}
+          Redis: {{ shared_redis_hostname }}:{{ shared_redis_port }}
+
+        Auto-Detection: {{ oneclick_auto_detect_database }}

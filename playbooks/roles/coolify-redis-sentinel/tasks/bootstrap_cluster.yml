@@ -1,0 +1,46 @@
+---
+# Bootstrap the Redis Sentinel cluster
+# Deploys the master node first, then waits for it to be healthy
+#
+# Required variables:
+#   redis_nodes: List of all cluster nodes
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Identify master node"
+  ansible.builtin.set_fact:
+    redis_master_node: "{{ redis_nodes | selectattr('role', 'equalto', 'master') | first }}"
+
+- name: "Deploy master node"
+  ansible.builtin.include_tasks: deploy_node.yml
+  vars:
+    redis_current_node: "{{ redis_master_node }}"
+
+- name: "Wait for master Redis service to be deployed"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ redis_service_uuids[redis_master_node.name] }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: redis_master_status
+  retries: 30
+  delay: 10
+  until: >
+    redis_master_status.json.status is defined and
+    redis_master_status.json.status in ['running', 'healthy']
+  when: redis_service_uuids[redis_master_node.name] is defined
+
+- name: "Display master bootstrap result"
+  ansible.builtin.debug:
+    msg: |
+      Redis Master Bootstrap Complete:
+        Node: {{ redis_master_node.name }}
+        IP: {{ redis_master_node.ip }}
+        Service UUID: {{ redis_service_uuids[redis_master_node.name] | default('N/A') }}
+        Status: {{ redis_master_status.json.status | default('unknown') }}
+
+- name: "Store master connection info for replicas"
+  ansible.builtin.set_fact:
+    redis_master_ip: "{{ redis_master_node.ip }}"
+    redis_master_name: "{{ redis_master_name | default('mymaster') }}"

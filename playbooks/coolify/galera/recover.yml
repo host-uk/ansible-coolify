@@ -1,0 +1,210 @@
+---
+# Recover Galera Cluster
+#
+# Use this playbook to recover from cluster failures.
+#
+# Usage:
+#   # Recover single failed node
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/recover.yml \
+#     -e recover_node=app-server-1.lan
+#
+#   # Bootstrap cluster from specific node (after total failure)
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/recover.yml \
+#     -e bootstrap_node=app-server-2.lan \
+#     -e force_bootstrap=true
+#
+# Options:
+#   recover_node: Hostname of single node to recover
+#   bootstrap_node: Hostname to bootstrap from (for total cluster failure)
+#   force_bootstrap: Set to true to force bootstrap (dangerous!)
+
+- name: Recover Galera Cluster
+  hosts: controller
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Validate recovery options
+      ansible.builtin.assert:
+        that:
+          - recover_node is defined or bootstrap_node is defined
+        fail_msg: |
+          You must specify either:
+            -e recover_node=<hostname>     (for single node recovery)
+            -e bootstrap_node=<hostname>   (for total cluster failure)
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Galera role defaults
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: main.yml
+
+    # Single node recovery
+    - name: Recover single node
+      when: recover_node is defined
+      block:
+        - name: Find node configuration
+          ansible.builtin.set_fact:
+            galera_recover_node_config: >-
+              {{ galera_nodes | selectattr('host', 'equalto', recover_node) | first | default({}) }}
+
+        - name: Fail if node not found
+          ansible.builtin.fail:
+            msg: "Node {{ recover_node }} not found in galera_nodes configuration"
+          when: galera_recover_node_config == {}
+
+        - name: Display recovery info
+          ansible.builtin.debug:
+            msg: |
+              Recovering node:
+                Name: {{ galera_recover_node_config.name }}
+                Host: {{ galera_recover_node_config.host }}
+                IP: {{ galera_recover_node_config.ip }}
+
+        - name: Get Coolify services
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: galera_services
+
+        - name: Find service UUID
+          ansible.builtin.set_fact:
+            galera_recover_service_uuid: >-
+              {{
+                galera_services.json
+                | selectattr('name', 'equalto', galera_recover_node_config.name)
+                | map(attribute='uuid')
+                | first
+                | default('')
+              }}
+
+        - name: Restart service via Coolify
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services/{{ galera_recover_service_uuid }}/restart"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: [200, 202]
+          when: galera_recover_service_uuid != ''
+
+        - name: Wait for node to rejoin cluster
+          ansible.builtin.pause:
+            seconds: 60
+            prompt: "Waiting for {{ galera_recover_node_config.name }} to rejoin cluster..."
+
+        - name: Verify recovery
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: health_check.yml
+          vars:
+            galera_health_check_strict: false
+
+    # Full cluster bootstrap recovery
+    - name: Bootstrap cluster recovery
+      when: bootstrap_node is defined
+      block:
+        - name: Confirm force bootstrap
+          ansible.builtin.fail:
+            msg: |
+              DANGER: Full cluster bootstrap will reset the cluster.
+              If you are sure, add: -e force_bootstrap=true
+          when: not force_bootstrap | default(false) | bool
+
+        - name: Find bootstrap node configuration
+          ansible.builtin.set_fact:
+            galera_bootstrap_node_config: >-
+              {{ galera_nodes | selectattr('host', 'equalto', bootstrap_node) | first | default({}) }}
+
+        - name: Fail if node not found
+          ansible.builtin.fail:
+            msg: "Node {{ bootstrap_node }} not found in galera_nodes configuration"
+          when: galera_bootstrap_node_config == {}
+
+        - name: Display bootstrap warning
+          ansible.builtin.debug:
+            msg: |
+              ⚠️  FULL CLUSTER BOOTSTRAP RECOVERY
+
+              This will:
+              1. Stop all existing Galera nodes
+              2. Bootstrap from {{ galera_bootstrap_node_config.name }}
+              3. Rejoin all other nodes
+
+              Make sure {{ bootstrap_node }} has the most recent data!
+
+        - name: Stop all Galera services
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: galera_all_services
+
+        - name: Stop each Galera service
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services/{{ item.uuid }}/stop"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: [200, 202]
+          loop: >-
+            {{ galera_all_services.json | selectattr('name', 'in', galera_nodes | map(attribute='name') | list) | list }}
+          loop_control:
+            label: "{{ item.name }}"
+          ignore_errors: true
+
+        - name: Wait for services to stop
+          ansible.builtin.pause:
+            seconds: 30
+            prompt: "Waiting for services to stop..."
+
+        - name: Reorder nodes with bootstrap first
+          ansible.builtin.set_fact:
+            galera_nodes_reordered: >-
+              {{ [galera_bootstrap_node_config] + (galera_nodes | rejectattr('host', 'equalto', bootstrap_node) | list) }}
+
+        - name: Bootstrap from selected node
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: deploy_node.yml
+          vars:
+            galera_current_node: "{{ galera_bootstrap_node_config }}"
+            galera_bootstrap_node: true
+            galera_nodes: "{{ galera_nodes_reordered }}"
+
+        - name: Wait for bootstrap node
+          ansible.builtin.pause:
+            seconds: 60
+            prompt: "Waiting for bootstrap node to initialize..."
+
+        - name: Set bootstrap complete
+          ansible.builtin.set_fact:
+            galera_bootstrap_complete: true
+
+        - name: Join remaining nodes
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: join_cluster.yml
+          vars:
+            galera_nodes: "{{ galera_nodes_reordered }}"
+
+        - name: Verify cluster recovery
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: health_check.yml
+
+    - name: Display recovery result
+      ansible.builtin.debug:
+        msg: |
+          Recovery complete.
+          Cluster status: {{ galera_cluster_healthy | default('unknown') }}
+          Running nodes: {{ galera_running_count | default('?') }}/{{ galera_nodes | length }}

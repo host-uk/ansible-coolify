@@ -1,0 +1,75 @@
+---
+# Check PostgreSQL Patroni Cluster Status
+#
+# This playbook checks the health and status of an existing PostgreSQL Patroni cluster.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/postgresql/status.yml
+
+- name: Check PostgreSQL Patroni Cluster Status
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include PostgreSQL Patroni role defaults
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: main.yml
+
+    - name: Check cluster health
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: health_check.yml
+      vars:
+        postgresql_health_fail_on_error: false
+
+    - name: Get all PostgreSQL services from Coolify
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: postgresql_all_services
+
+    - name: Filter PostgreSQL services
+      ansible.builtin.set_fact:
+        postgresql_services: >-
+          {{
+            postgresql_all_services.json
+            | selectattr('name', 'search', '^postgres-')
+            | list
+          }}
+
+    - name: Display cluster status
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    POSTGRESQL PATRONI CLUSTER STATUS
+          ====================================================================
+            Cluster Name: {{ postgresql_cluster_name }}
+            Patroni Scope: {{ postgresql_scope }}
+
+            Configured Nodes:
+          {% for node in postgresql_nodes %}
+              - {{ node.name }} ({{ node.ip }}) - {{ node.role }}
+          {% endfor %}
+
+            Coolify Services Found: {{ postgresql_services | length }}
+          {% for svc in postgresql_services %}
+              - {{ svc.name }}: {{ svc.status | default('unknown') }}
+          {% endfor %}
+
+            Health Summary:
+              Patroni Reachable: {{ postgresql_health_summary.patroni_reachable | default('unknown') }}
+              etcd Healthy: {{ postgresql_health_summary.etcd_healthy | default('unknown') }}
+              Primary Healthy: {{ postgresql_health_summary.primary_healthy | default('unknown') }}
+              Current Leader: {{ postgresql_health_summary.leader_node | default('unknown') }}
+              Members: {{ postgresql_health_summary.patroni_members | default('?') }}/{{ postgresql_health_summary.total_nodes | default('?') }}
+          ====================================================================

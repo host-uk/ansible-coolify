@@ -1,0 +1,32 @@
+# Service definition for: embystat
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=embystat -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: embystat
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          embystat:
+            image: 'lscr.io/linuxserver/embystat:latest'
+            environment:
+              - SERVICE_URL_EMBYSTAT_6555
+              - PUID=1000
+              - PGID=1000
+              - TZ=Europe/Madrid
+            volumes:
+              - 'embystat-config:/config'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:6555'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

@@ -23,16 +23,29 @@
     # SETUP
     # ==========================================================================
     - name: "SETUP: Verify Docker is available"
-      ansible.builtin.command: docker info
+      community.docker.docker_host_info:
       register: docker_info
-      changed_when: false
-      failed_when: docker_info.rc != 0
 
-    - name: "SETUP: Ensure clean state before tests"
-      ansible.builtin.shell: |
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
-        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
-      changed_when: true
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
       ignore_errors: true
 
     - name: "SETUP: Create containers with docker_dev role"
@@ -216,17 +229,19 @@
       changed_when: true
 
     - name: "SSH-007: Set key permissions in container"
-      ansible.builtin.command: >
-        docker exec {{ docker_dev_name_prefix }}-controller chmod 600 /tmp/worker-key
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-controller"
+        command: chmod 600 /tmp/worker-key
       changed_when: true
 
     - name: "SSH-007: Test SSH from controller to worker (container-to-container)"
-      ansible.builtin.command: >
-        docker exec {{ docker_dev_name_prefix }}-controller
-        ssh -o StrictHostKeyChecking=no
-            -o UserKnownHostsFile=/dev/null
-            -i /tmp/worker-key
-            root@{{ docker_dev_containers[1].ip }} "echo 'C2C_SSH_OK'"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-controller"
+        command: >
+          ssh -o StrictHostKeyChecking=no
+              -o UserKnownHostsFile=/dev/null
+              -i /tmp/worker-key
+              root@{{ docker_dev_containers[1].ip }} "echo 'C2C_SSH_OK'"
       register: c2c_ssh
       changed_when: false
 
@@ -242,9 +257,10 @@
   # ============================================================================
   post_tasks:
     - name: "CLEANUP: Destroy test containers"
-      ansible.builtin.command: >
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
-      changed_when: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
       ignore_errors: true
 
     - name: "CLEANUP: Remove test directories"

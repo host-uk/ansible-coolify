@@ -1,0 +1,35 @@
+---
+# Join remaining nodes to the Galera cluster
+#
+# This task deploys all non-bootstrap nodes sequentially,
+# allowing each to sync with the cluster before the next joins.
+#
+# Required variables:
+#   galera_nodes: List of all cluster nodes
+#   galera_bootstrap_complete: Must be true (set by bootstrap_cluster.yml)
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Join: Verify bootstrap is complete"
+  ansible.builtin.fail:
+    msg: "Bootstrap must be complete before joining nodes. Run bootstrap_cluster.yml first."
+  when: not galera_bootstrap_complete | default(false)
+
+- name: "Join: Get non-bootstrap nodes"
+  ansible.builtin.set_fact:
+    galera_join_nodes: "{{ galera_nodes[1:] }}"
+
+- name: "Join: Display nodes to join"
+  ansible.builtin.debug:
+    msg: |
+      Joining {{ galera_join_nodes | length }} nodes to cluster:
+      {% for node in galera_join_nodes %}
+        - {{ node.name }} ({{ node.ip }})
+      {% endfor %}
+
+- name: "Join: Deploy each node sequentially"
+  ansible.builtin.include_tasks: join_single_node.yml
+  loop: "{{ galera_join_nodes }}"
+  loop_control:
+    loop_var: galera_join_node
+    pause: 30  # Wait between nodes for sync

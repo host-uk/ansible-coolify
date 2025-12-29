@@ -1,0 +1,46 @@
+# Service definition for: metabase
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=metabase -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: metabase
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          metabase:
+            image: 'metabase/metabase:latest'
+            volumes:
+              - '/dev/urandom:/dev/random:ro'
+            environment:
+              - SERVICE_URL_METABASE_3000
+              - MB_DB_TYPE=postgres
+              - MB_DB_HOST=postgresql
+              - MB_DB_PORT=5432
+              - 'MB_DB_DBNAME=${POSTGRESQL_DATABASE:-metabase}'
+              - MB_DB_USER=$SERVICE_USER_POSTGRESQL
+              - MB_DB_PASS=$SERVICE_PASSWORD_POSTGRESQL
+            healthcheck:
+              test: 'curl --fail -I http://127.0.0.1:3000/api/health || exit 1'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+          postgresql:
+            image: 'postgres:16-alpine'
+            volumes:
+              - 'metabase-postgresql-data:/var/lib/postgresql/data'
+            environment:
+              - 'POSTGRES_USER=${SERVICE_USER_POSTGRESQL}'
+              - 'POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRESQL}'
+              - 'POSTGRES_DB=${POSTGRESQL_DATABASE:-metabase}'
+            healthcheck:
+              test:
+                - CMD-SHELL
+                - 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

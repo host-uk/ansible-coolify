@@ -1,0 +1,9 @@
+# Template: classicpress-without-database
+# Auto-generated from service test
+# Date: 2025-12-29T03:14:11+00:00
+
+name: classicpress-without-database
+service_type: classicpress-without-database
+source: automated-test
+tested: true
+test_date: 2025-12-29T03:14:11+00:00

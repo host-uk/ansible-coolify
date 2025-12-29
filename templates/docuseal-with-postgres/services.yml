@@ -1,0 +1,50 @@
+# Service definition for: docuseal-with-postgres
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=docuseal-with-postgres -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: docuseal-with-postgres
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          docuseal:
+            image: 'docuseal/docuseal:latest'
+            environment:
+              - SERVICE_URL_DOCUSEAL_3000
+              - 'HOST=${SERVICE_URL_DOCUSEAL}'
+              - 'DATABASE_URL=postgresql://$SERVICE_USER_POSTGRES:$SERVICE_PASSWORD_POSTGRES@postgresql:5432/${POSTGRES_DB}'
+            volumes:
+              - 'docuseal-data:/data'
+            depends_on:
+              postgresql:
+                condition: service_healthy
+            healthcheck:
+              test:
+                - CMD
+                - wget
+                - '-q'
+                - '--spider'
+                - 'http://127.0.0.1:3000'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+          postgresql:
+            image: 'postgres:16-alpine'
+            volumes:
+              - 'postgresql-data:/var/lib/postgresql/data'
+            environment:
+              - POSTGRES_USER=$SERVICE_USER_POSTGRES
+              - POSTGRES_PASSWORD=$SERVICE_PASSWORD_POSTGRES
+              - 'POSTGRES_DB=${POSTGRES_DB:-docuseal}'
+            healthcheck:
+              test:
+                - CMD-SHELL
+                - 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

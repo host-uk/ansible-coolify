@@ -1,0 +1,9 @@
+# Environment variables for wordpress-with-mysql
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+MYSQL_PASSWORD: "$SERVICE_PASSWORD_WORDPRESS"
+MYSQL_ROOT_PASSWORD: "$SERVICE_PASSWORD_ROOT"
+MYSQL_USER: "$SERVICE_USER_WORDPRESS"
+WORDPRESS_DB_PASSWORD: "$SERVICE_PASSWORD_WORDPRESS"
+WORDPRESS_DB_USER: "$SERVICE_USER_WORDPRESS"

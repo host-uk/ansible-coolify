@@ -1,8 +1,16 @@
 ---
 # Test 07: Full Integration
 # Tests: Complete end-to-end workflow from container creation to resource management
+#
+# Uses multi-play structure:
+# 1. localhost: Create Docker containers via docker_dev role
+# 2. test-controller.lan: Install Coolify via coolify role
+# 3. localhost: Run integration tests
 
-- name: "Test 07: Full Integration"
+# =============================================================================
+# PLAY 1: Create Docker Development Environment
+# =============================================================================
+- name: "Test 07: Setup Docker Environment"
   hosts: localhost
   connection: local
   gather_facts: false
@@ -15,134 +23,144 @@
     docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
     docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
     docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
-    docker_dev_containers: "{{ test_docker_dev_containers_full }}"  # Use full container set
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
     docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
-    controller_container: "{{ docker_dev_name_prefix }}-controller"
-    controller_ip: "172.29.0.10"
-    coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
-    test_project_name: "integration-test-project"
 
   tasks:
-    # ==========================================================================
-    # PHASE 1: Environment Setup
-    # ==========================================================================
-    - name: "PHASE 1: Clean existing environment"
-      ansible.builtin.shell: |
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
-        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
-      changed_when: true
+    - name: "PHASE 1: Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 07: FULL INTEGRATION
+          ====================================================================
+            Phase 1: Creating Docker development environment
+            - Using docker_dev role for container management
+            - Using coolify role for Coolify installation
+            - Testing complete end-to-end workflow
+          ====================================================================
+
+    - name: "PHASE 1: Verify Docker is available"
+      community.docker.docker_host_info:
+      register: docker_info
+      failed_when: docker_info is failed
+
+    - name: "PHASE 1: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "PHASE 1: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "PHASE 1: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
       ignore_errors: true
 
     - name: "PHASE 1: Create all containers"
       ansible.builtin.include_role:
         name: docker_dev
 
-    - name: "PHASE 1: Wait for all containers to be healthy"
-      ansible.builtin.command: >
-        docker inspect --format='{{ '{{' }}.State.Health.Status{{ '}}' }}' {{ docker_dev_name_prefix }}-{{ item.name }}
-      register: health
-      loop: "{{ docker_dev_containers }}"
-      changed_when: false
-      retries: 60
-      delay: 2
-      until: health.stdout == 'healthy'
-
     - name: "PHASE 1: Verify all containers running"
-      ansible.builtin.command: >
-        docker ps --filter "name={{ docker_dev_name_prefix }}" --format "{{ '{{' }}.Names{{ '}}' }}"
-      register: running_containers
-      changed_when: false
+      community.docker.docker_container_info:
+        name: "{{ docker_dev_name_prefix }}-{{ item.name }}"
+      register: container_info
+      loop: "{{ docker_dev_containers }}"
 
     - name: "PHASE 1: Assert expected container count"
       ansible.builtin.assert:
         that:
-          - running_containers.stdout_lines | length == docker_dev_containers | length
-        fail_msg: "Expected {{ docker_dev_containers | length }} containers, got {{ running_containers.stdout_lines | length }}"
+          - container_info.results | selectattr('container.State.Running', 'equalto', true) | list | length == docker_dev_containers | length
+        fail_msg: "Expected {{ docker_dev_containers | length }} containers running"
         success_msg: "All {{ docker_dev_containers | length }} containers running"
 
-    # ==========================================================================
-    # PHASE 2: Coolify Installation
-    # ==========================================================================
-    - name: "PHASE 2: Download Coolify install script"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        curl -fsSL https://cdn.coollabs.io/coolify/install.sh -o /root/install.sh
-      register: install_download
-      changed_when: true
-      retries: 3
-      delay: 5
-      until: install_download.rc == 0
+  tags:
+    - test
+    - full-integration
+    - setup
 
-    - name: "PHASE 2: Make install script executable"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }} chmod +x /root/install.sh
-      changed_when: true
+# =============================================================================
+# PLAY 2: Install Coolify via Role
+# =============================================================================
+- name: "Test 07: Install Coolify via Role"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    # Coolify role configuration for testing
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "TestPassword123!"
+    coolify_auto_setup_enabled: true
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "./state"
+    coolify_docker_address_pool_base: "172.30.0.0/16"
+    coolify_docker_address_pool_size: "24"
+    coolify_docker_pool_force_override: false
+    coolify_autoupdate: false
+    coolify_registry_url: "https://hub.docker.com"
+    coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    coolify_detected_key_uuid: ""
 
-    - name: "PHASE 2: Install Coolify on controller"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        /bin/bash -c "TERM=dumb /root/install.sh"
-      register: install
-      changed_when: true
-      timeout: 900
+  tasks:
+    - name: "PHASE 2: Install and configure via coolify role"
+      ansible.builtin.include_role:
+        name: coolify
 
-    - name: "PHASE 2: Wait for Coolify UI"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        curl -sf -o /dev/null http://localhost:8000
-      register: ui_ready
-      changed_when: false
-      retries: 60
-      delay: 5
-      until: ui_ready.rc == 0
-
-    # ==========================================================================
-    # PHASE 3: API Setup
-    # ==========================================================================
-    - name: "PHASE 3: Enable API and create token"
-      ansible.builtin.shell: |
-        docker exec {{ controller_container }} docker exec coolify php artisan tinker --execute='
-        $settings = \App\Models\InstanceSettings::first();
-        $settings->is_api_enabled = true;
-        $settings->allowed_ips = "0.0.0.0";
-        $settings->save();
-        $user = \App\Models\User::first();
-        if (!$user) {
-            $user = \App\Models\User::create([
-                "name" => "admin",
-                "email" => "admin@test.local",
-                "password" => \Illuminate\Support\Facades\Hash::make("password123"),
-                "email_verified_at" => now(),
-            ]);
-        }
-        $team = $user->teams()->first();
-        if (!$team) {
-            $team = \App\Models\Team::create([
-                "name" => $user->name . " Team",
-                "personal_team" => true,
-            ]);
-            $user->teams()->attach($team->id, ["role" => "admin"]);
-        }
-        $plainToken = \Illuminate\Support\Str::random(40);
-        $newToken = new \Laravel\Sanctum\PersonalAccessToken();
-        $newToken->name = "integration-test";
-        $newToken->token = hash("sha256", $plainToken);
-        $newToken->abilities = ["*"];
-        $newToken->tokenable_id = $user->id;
-        $newToken->tokenable_type = get_class($user);
-        $newToken->team_id = $team->id;
-        $newToken->save();
-        echo $plainToken;
-        '
-      register: token_result
-      changed_when: true
-      retries: 10
-      delay: 5
-      until: token_result.rc == 0
-
-    - name: "PHASE 3: Extract API token"
+    - name: "PHASE 2: Store API token for later plays"
       ansible.builtin.set_fact:
-        coolify_api_token: "{{ token_result.stdout_lines | last | trim }}"
+        controller_api_token: "{{ coolify_api_token }}"
+        controller_api_ready: "{{ coolify_api_ready }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+  tags:
+    - test
+    - full-integration
+    - coolify-setup
+
+# =============================================================================
+# PLAY 3: Run Integration Tests
+# =============================================================================
+- name: "Test 07: Full Integration Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
+    coolify_api_token: "{{ controller_api_token }}"
+    test_project_name: "integration-test-project"
+
+  tasks:
+    # ==========================================================================
+    # PHASE 3: Verify API Setup
+    # ==========================================================================
+    - name: "PHASE 3: Verify Coolify API is ready"
+      ansible.builtin.assert:
+        that:
+          - controller_api_ready | default(false)
+          - controller_api_token | default('') | length > 0
+        fail_msg: "Coolify API not ready or token not set"
+        success_msg: "Coolify API ready, token configured via role"
 
     - name: "PHASE 3: Verify API is working"
       ansible.builtin.uri:
@@ -159,48 +177,29 @@
     # ==========================================================================
     # PHASE 4: Register All Nodes
     # ==========================================================================
-    - name: "PHASE 4: Generate SSH key for node registration"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }}
-        ssh-keygen -t rsa -b 4096 -f /tmp/integration-key -N "" -C "integration-test"
-      changed_when: true
-
-    - name: "PHASE 4: Read keys"
-      ansible.builtin.command: >
-        docker exec {{ controller_container }} cat /tmp/integration-key{{ item }}
-      register: ssh_keys
-      loop: ["", ".pub"]
-      changed_when: false
-
-    - name: "PHASE 4: Set key facts"
-      ansible.builtin.set_fact:
-        integration_private_key: "{{ ssh_keys.results[0].stdout }}"
-        integration_public_key: "{{ ssh_keys.results[1].stdout }}"
-
-    - name: "PHASE 4: Register private key in Coolify"
+    - name: "PHASE 4: Get existing SSH keys from Coolify"
       ansible.builtin.uri:
         url: "{{ coolify_api_base_url }}/security/keys"
-        method: POST
+        method: GET
         headers:
           Authorization: "Bearer {{ coolify_api_token }}"
-          Content-Type: "application/json"
-        body_format: json
-        body:
-          name: "integration-test-key"
-          description: "Key for integration test nodes"
-          private_key: "{{ integration_private_key }}"
-        status_code: [200, 201]
-      register: key_register
+        status_code: 200
+      register: existing_keys
 
-    - name: "PHASE 4: Store key UUID"
+    - name: "PHASE 4: Store private key UUID"
       ansible.builtin.set_fact:
-        private_key_uuid: "{{ key_register.json.uuid }}"
+        private_key_uuid: "{{ existing_keys.json[0].uuid }}"
+      when: existing_keys.json | length > 0
 
-    # Register non-controller nodes
+    - name: "PHASE 4: Get public key from controller"
+      ansible.builtin.slurp:
+        src: "{{ (docker_dev_ssh_keys_path | expanduser) }}/test-controller.lan.pub"
+      register: controller_pubkey
+
     - name: "PHASE 4: Distribute public key to worker nodes"
-      ansible.builtin.command: >
-        docker exec {{ docker_dev_name_prefix }}-{{ item.name }}
-        /bin/bash -c "echo '{{ integration_public_key }}' >> /root/.ssh/authorized_keys"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-{{ item.name }}"
+        command: /bin/bash -c "echo '{{ controller_pubkey.content | b64decode }}' >> /root/.ssh/authorized_keys"
       loop: "{{ docker_dev_containers | rejectattr('name', 'equalto', 'controller') | list }}"
       changed_when: true
 
@@ -301,15 +300,6 @@
       when: item.json.uuid is defined
       ignore_errors: true
 
-    - name: "PHASE 6: Delete private key"
-      ansible.builtin.uri:
-        url: "{{ coolify_api_base_url }}/security/keys/{{ private_key_uuid }}"
-        method: DELETE
-        headers:
-          Authorization: "Bearer {{ coolify_api_token }}"
-        status_code: [200, 204]
-      ignore_errors: true
-
     # ==========================================================================
     # PHASE 7: Final Verification
     # ==========================================================================
@@ -329,14 +319,42 @@
         fail_msg: "Test project still exists"
         success_msg: "All test resources cleaned up"
 
+    - name: "PHASE 7: Build test summary"
+      ansible.builtin.set_fact:
+        test_summary:
+          coolify_installed_via_role: true
+          api_token_from_role: "{{ controller_api_token | length > 0 }}"
+          containers_created: "{{ docker_dev_containers | length }}"
+          nodes_registered: "{{ node_registrations.results | length }}"
+          project_lifecycle_verified: true
+
+    - name: "PHASE 7: Display test summary"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    FULL INTEGRATION TEST SUMMARY
+          ====================================================================
+            Coolify Setup (via coolify role):
+              Installed via Role: {{ test_summary.coolify_installed_via_role }}
+              API Token from Role: {{ test_summary.api_token_from_role }}
+
+            Integration Tests:
+              Containers Created: {{ test_summary.containers_created }}
+              Nodes Registered: {{ test_summary.nodes_registered }}
+              Project Lifecycle: {{ test_summary.project_lifecycle_verified }}
+
+            Overall: PASSED
+          ====================================================================
+
   # ============================================================================
   # CLEANUP
   # ============================================================================
   post_tasks:
     - name: "CLEANUP: Destroy test containers"
-      ansible.builtin.command: >
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
-      changed_when: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
       ignore_errors: true
 
     - name: "CLEANUP: Remove test directories"
@@ -361,7 +379,8 @@
         msg: |
           All integration tests passed!
           - Containers: {{ docker_dev_containers | length }} created and verified
-          - Coolify: Installed and API enabled
+          - Coolify: Installed via coolify role
+          - API: Token obtained from role
           - Nodes: All registered via API
           - Project: Created and cleaned up
 

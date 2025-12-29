@@ -1,0 +1,35 @@
+---
+# Backup task for inclusion in other playbooks
+#
+# Required variables:
+#   galera_backup_node_config: Node configuration dict
+#   galera_backup_dir: Backup destination directory
+#   backup_filename: Output filename
+
+- name: "Backup: Create mysqldump from {{ galera_backup_node_config.name }}"
+  ansible.builtin.shell: |
+    docker exec galera-{{ galera_backup_node_config.name }} \
+      mariadb-dump \
+      -u root \
+      -p{{ galera_root_password }} \
+      --all-databases \
+      --single-transaction \
+      --routines \
+      --triggers \
+      --events \
+      --add-drop-database \
+      2>/dev/null | gzip > /tmp/{{ backup_filename }}
+  delegate_to: "{{ galera_backup_node_config.host }}"
+
+- name: "Backup: Fetch to local state"
+  ansible.builtin.fetch:
+    src: "/tmp/{{ backup_filename }}"
+    dest: "{{ galera_backup_dir }}/{{ backup_filename }}"
+    flat: true
+  delegate_to: "{{ galera_backup_node_config.host }}"
+
+- name: "Backup: Cleanup remote file"
+  ansible.builtin.file:
+    path: "/tmp/{{ backup_filename }}"
+    state: absent
+  delegate_to: "{{ galera_backup_node_config.host }}"

@@ -1,0 +1,15 @@
+# Environment variables for n8n
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+DB_SQLITE_POOL_SIZE: "3"
+GENERIC_TIMEZONE: "Europe/Berlin"
+N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+N8N_EDITOR_BASE_URL: "${SERVICE_URL_N8N}"
+N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+N8N_GIT_NODE_DISABLE_BARE_REPOS: "true"
+N8N_HOST: "${SERVICE_URL_N8N}"
+N8N_PROXY_HOPS: "1"
+N8N_RUNNERS_ENABLED: "true"
+TZ: "Europe/Berlin"
+WEBHOOK_URL: "${SERVICE_URL_N8N}"

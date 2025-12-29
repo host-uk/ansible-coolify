@@ -1,0 +1,35 @@
+# Service definition for: duplicati
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=duplicati -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: duplicati
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          duplicati:
+            image: 'lscr.io/linuxserver/duplicati:latest'
+            environment:
+              - SERVICE_URL_DUPLICATI_8200
+              - PUID=1000
+              - PGID=1000
+              - 'TZ=${TZ:-Europe/London}'
+              - 'SETTINGS_ENCRYPTION_KEY=${SERVICE_PASSWORD_ENCRYPT}'
+              - 'DUPLICATI__WEBSERVICE_PASSWORD=${SERVICE_PASSWORD_WEB}'
+            volumes:
+              - 'duplicati-config:/config'
+              - 'duplicati-backups:/backups'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:8200'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

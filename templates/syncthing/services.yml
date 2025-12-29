@@ -1,0 +1,36 @@
+# Service definition for: syncthing
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=syncthing -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: syncthing
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          syncthing:
+            image: 'lscr.io/linuxserver/syncthing:latest'
+            environment:
+              - SERVICE_URL_SYNCTHING_8384
+              - PUID=1000
+              - PGID=1000
+              - 'TZ=${TZ:-Etc/UTC}'
+            volumes:
+              - 'syncthing_config:/config'
+              - 'syncthing_data1:/data1'
+              - 'syncthing_data2:/data2'
+            ports:
+              - '22000:22000/tcp'
+              - '22000:22000/udp'
+              - '21027:21027/udp'
+            healthcheck:
+              test:
+                - CMD-SHELL
+                - 'wget -qO- http://127.0.0.1:8384/'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

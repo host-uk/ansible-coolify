@@ -1,0 +1,5 @@
+# Environment variables for syncthing
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+TZ: "Etc/UTC"

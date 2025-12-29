@@ -1,0 +1,50 @@
+---
+# Bootstrap the PostgreSQL Patroni cluster
+# Deploys the primary node first, initializes etcd cluster
+#
+# Required variables:
+#   postgresql_nodes: List of all cluster nodes
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Identify primary node"
+  ansible.builtin.set_fact:
+    postgresql_primary_node: "{{ postgresql_nodes | selectattr('role', 'equalto', 'primary') | first }}"
+
+- name: "Deploy primary node"
+  ansible.builtin.include_tasks: deploy_node.yml
+  vars:
+    postgresql_current_node: "{{ postgresql_primary_node }}"
+
+- name: "Wait for primary PostgreSQL service to be deployed"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ postgresql_service_uuids[postgresql_primary_node.name] }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: postgresql_primary_status
+  retries: 30
+  delay: 10
+  until: >
+    postgresql_primary_status.json.status is defined and
+    postgresql_primary_status.json.status in ['running', 'healthy']
+  when: postgresql_service_uuids[postgresql_primary_node.name] is defined
+
+- name: "Wait for Patroni to initialize"
+  ansible.builtin.pause:
+    seconds: 30
+    prompt: "Waiting for Patroni to initialize cluster..."
+
+- name: "Display primary bootstrap result"
+  ansible.builtin.debug:
+    msg: |
+      PostgreSQL Primary Bootstrap Complete:
+        Node: {{ postgresql_primary_node.name }}
+        IP: {{ postgresql_primary_node.ip }}
+        Service UUID: {{ postgresql_service_uuids[postgresql_primary_node.name] | default('N/A') }}
+        Status: {{ postgresql_primary_status.json.status | default('unknown') }}
+
+- name: "Store primary connection info for replicas"
+  ansible.builtin.set_fact:
+    postgresql_primary_ip: "{{ postgresql_primary_node.ip }}"

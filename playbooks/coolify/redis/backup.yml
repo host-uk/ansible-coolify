@@ -1,0 +1,110 @@
+---
+# Backup Redis Sentinel Cluster
+#
+# This playbook creates a backup of the Redis data from the master node.
+# Uses BGSAVE to create an RDB snapshot without blocking the server.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/redis/backup.yml
+
+- name: Backup Redis Sentinel Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Redis Sentinel role defaults
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: main.yml
+
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ redis_backup_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+
+    - name: Set backup filename
+      ansible.builtin.set_fact:
+        redis_backup_filename: "redis-backup-{{ ansible_date_time.date }}-{{ ansible_date_time.epoch }}.rdb"
+
+    - name: Trigger BGSAVE on master
+      ansible.builtin.command:
+        cmd: >
+          docker exec redis-{{ redis_master_node.name }}
+          redis-cli -a {{ redis_password }} BGSAVE
+      register: redis_bgsave
+      changed_when: true
+      delegate_to: "{{ redis_master_node.host }}"
+      no_log: true
+
+    - name: Wait for BGSAVE to complete
+      ansible.builtin.command:
+        cmd: >
+          docker exec redis-{{ redis_master_node.name }}
+          redis-cli -a {{ redis_password }} LASTSAVE
+      register: redis_lastsave
+      changed_when: false
+      delegate_to: "{{ redis_master_node.host }}"
+      retries: 30
+      delay: 2
+      until: redis_lastsave.rc == 0
+      no_log: true
+
+    - name: Copy RDB file from container
+      ansible.builtin.command:
+        cmd: >
+          docker cp redis-{{ redis_master_node.name }}:/data/dump.rdb
+          /tmp/{{ redis_backup_filename }}
+      delegate_to: "{{ redis_master_node.host }}"
+      changed_when: true
+
+    - name: Fetch backup to control machine
+      ansible.builtin.fetch:
+        src: "/tmp/{{ redis_backup_filename }}"
+        dest: "{{ redis_backup_dir }}/{{ redis_backup_filename }}"
+        flat: true
+      delegate_to: "{{ redis_master_node.host }}"
+
+    - name: Clean up temporary backup file
+      ansible.builtin.file:
+        path: "/tmp/{{ redis_backup_filename }}"
+        state: absent
+      delegate_to: "{{ redis_master_node.host }}"
+
+    - name: Remove old backups
+      ansible.builtin.find:
+        paths: "{{ redis_backup_dir }}"
+        patterns: "redis-backup-*.rdb"
+        age: "{{ redis_backup_retention_days }}d"
+      register: redis_old_backups
+      delegate_to: localhost
+
+    - name: Delete old backup files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ redis_old_backups.files }}"
+      delegate_to: localhost
+      when: redis_old_backups.files | length > 0
+
+    - name: Display backup summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                         REDIS BACKUP COMPLETE
+          ====================================================================
+            Backup Details:
+              Source: {{ redis_master_node.name }} ({{ redis_master_node.ip }})
+              Filename: {{ redis_backup_filename }}
+              Location: {{ redis_backup_dir }}/{{ redis_backup_filename }}
+
+            Retention: {{ redis_backup_retention_days }} days
+            Old backups removed: {{ redis_old_backups.files | length }}
+          ====================================================================

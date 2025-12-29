@@ -1,0 +1,73 @@
+scope: {{ postgresql_scope }}
+name: {{ postgresql_node_name }}
+
+restapi:
+  listen: 0.0.0.0:{{ patroni_restapi_port }}
+  connect_address: {{ postgresql_node_ip }}:{{ patroni_restapi_port }}
+
+etcd3:
+  hosts: {{ postgresql_nodes | map(attribute='ip') | map('regex_replace', '$', ':' ~ etcd_client_port) | join(',') }}
+
+bootstrap:
+  dcs:
+    ttl: {{ patroni_ttl }}
+    loop_wait: {{ patroni_loop_wait }}
+    retry_timeout: {{ patroni_retry_timeout }}
+    maximum_lag_on_failover: {{ patroni_maximum_lag_on_failover }}
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: {{ postgresql_max_connections }}
+        shared_buffers: {{ postgresql_shared_buffers }}
+        work_mem: {{ postgresql_work_mem }}
+        maintenance_work_mem: {{ postgresql_maintenance_work_mem }}
+        wal_level: {{ postgresql_wal_level }}
+        max_wal_senders: {{ postgresql_max_wal_senders }}
+        max_replication_slots: {{ postgresql_max_replication_slots }}
+        hot_standby: {{ postgresql_hot_standby }}
+        wal_log_hints: 'on'
+        archive_mode: 'on'
+        archive_command: '/bin/true'
+
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+
+  pg_hba:
+    - host replication {{ postgresql_replication_user }} 0.0.0.0/0 md5
+    - host all all 0.0.0.0/0 md5
+
+  users:
+    {{ postgresql_superuser }}:
+      password: {{ postgresql_superuser_password }}
+      options:
+        - superuser
+    {{ postgresql_replication_user }}:
+      password: {{ postgresql_replication_password }}
+      options:
+        - replication
+    {{ postgresql_app_user }}:
+      password: {{ postgresql_app_password }}
+      options:
+        - createdb
+
+postgresql:
+  listen: 0.0.0.0:{{ postgresql_port }}
+  connect_address: {{ postgresql_node_ip }}:{{ postgresql_port }}
+  data_dir: /var/lib/postgresql/data
+  authentication:
+    superuser:
+      username: {{ postgresql_superuser }}
+      password: {{ postgresql_superuser_password }}
+    replication:
+      username: {{ postgresql_replication_user }}
+      password: {{ postgresql_replication_password }}
+  parameters:
+    unix_socket_directories: '/var/run/postgresql'
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

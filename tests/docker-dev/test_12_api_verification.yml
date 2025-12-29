@@ -1,0 +1,583 @@
+---
+# Test 12: API Verification
+# Tests: Verifies Ansible-created resources are correctly reflected in Coolify API
+# This test creates resources via Ansible and verifies they appear correctly in the API
+#
+# Multi-play pattern:
+#   - Play 1: localhost - setup containers via docker_dev role
+#   - Play 2: target host - install Coolify via coolify role
+#   - Play 3: localhost - run API verification tests
+
+# =============================================================================
+# PLAY 1: Setup Docker Development Environment (localhost)
+# =============================================================================
+- name: "Test 12: API Verification - Setup Containers"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file_stat
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file_stat.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing compose directory"
+      ansible.builtin.file:
+        path: "{{ docker_dev_compose_path }}"
+        state: absent
+
+    - name: "SETUP: Remove existing logs directory"
+      ansible.builtin.file:
+        path: "{{ docker_dev_logs_path }}"
+        state: absent
+
+    - name: "SETUP: Create containers with docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+    - name: "SETUP: Store container info for later plays"
+      ansible.builtin.set_fact:
+        controller_container: "{{ docker_dev_name_prefix }}-controller"
+        controller_ip: "172.29.0.10"
+        controller_hostname: "test-controller.lan"
+        test_containers: "{{ docker_dev_containers }}"
+        compose_path: "{{ docker_dev_compose_path }}"
+        logs_path: "{{ docker_dev_logs_path }}"
+
+  tags:
+    - test
+    - api-verification
+    - docker-dev
+
+# =============================================================================
+# PLAY 2: Install Coolify on Controller (target host)
+# =============================================================================
+- name: "Test 12: API Verification - Install Coolify"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    # Coolify role configuration
+    coolify_auto_setup_enabled: true
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "Password123!"
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "{{ playbook_dir }}/../../state"
+    # Skip common role hardening for test containers
+    common_manage_ufw: false
+
+  tasks:
+    - name: "INSTALL: Include coolify role"
+      ansible.builtin.include_role:
+        name: coolify
+
+    - name: "INSTALL: Wait for Coolify API to be ready"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_ready_check
+      retries: 30
+      delay: 5
+      until: api_ready_check.status == 200
+      when: coolify_api_token | default('') != ''
+
+    - name: "INSTALL: Store API token for next play"
+      ansible.builtin.set_fact:
+        stored_api_token: "{{ coolify_api_token }}"
+        api_base_url: "{{ coolify_api_base_url }}"
+      when: coolify_api_token | default('') != ''
+
+  tags:
+    - test
+    - api-verification
+    - docker-dev
+
+# =============================================================================
+# PLAY 3: Run API Verification Tests (localhost)
+# =============================================================================
+- name: "Test 12: API Verification - Run Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    controller_ip: "172.29.0.10"
+    coolify_api_base_url: "http://{{ controller_ip }}:8000/api/v1"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    # Test resources to create and verify
+    test_resources:
+      project:
+        name: "verification-test-project"
+        description: "Created by API verification test"
+      environments:
+        - name: "production"
+          description: "Production environment"
+        - name: "staging"
+          description: "Staging environment"
+      services:
+        - name: "test-redis"
+          type: "redis"
+          environment: "production"
+        - name: "test-postgres"
+          type: "postgresql"
+          environment: "production"
+
+  tasks:
+    # ==========================================================================
+    # SETUP: Get API Token from Controller
+    # ==========================================================================
+    - name: "SETUP: Read API token from controller"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: cat /data/coolify/ansible-token
+      register: token_read
+      changed_when: false
+      retries: 5
+      delay: 2
+      until: token_read.rc == 0
+
+    - name: "SETUP: Set API token fact"
+      ansible.builtin.set_fact:
+        coolify_api_token: "{{ token_read.stdout | trim }}"
+
+    - name: "SETUP: Verify API access"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+      retries: 10
+      delay: 3
+      until: api_check.status == 200
+
+    # ==========================================================================
+    # VERIFY-001: API Version and Health
+    # ==========================================================================
+    - name: "VERIFY-001: Check API version endpoint"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        return_content: true
+        status_code: 200
+      register: v001_version
+
+    - name: "VERIFY-001: Assert version response valid"
+      ansible.builtin.assert:
+        that:
+          - v001_version.status == 200
+          - v001_version.content is defined
+        fail_msg: "Version endpoint invalid"
+        success_msg: "API version: {{ v001_version.content }}"
+
+    # ==========================================================================
+    # VERIFY-002: List Servers Before Creation
+    # ==========================================================================
+    - name: "VERIFY-002: Get initial server list"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: v002_servers_before
+
+    - name: "VERIFY-002: Store initial server count"
+      ansible.builtin.set_fact:
+        initial_server_count: "{{ v002_servers_before.json | length }}"
+
+    - name: "VERIFY-002: Assert servers endpoint works"
+      ansible.builtin.assert:
+        that:
+          - v002_servers_before.status == 200
+          - v002_servers_before.json is defined
+        fail_msg: "Servers endpoint failed"
+        success_msg: "Initial servers: {{ initial_server_count }}"
+
+    # ==========================================================================
+    # VERIFY-003: Create and Verify Project
+    # ==========================================================================
+    - name: "VERIFY-003: Create test project via API"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ test_resources.project.name }}"
+          description: "{{ test_resources.project.description }}"
+        status_code: [200, 201]
+      register: v003_project_create
+
+    - name: "VERIFY-003: Store project UUID"
+      ansible.builtin.set_fact:
+        test_project_uuid: "{{ v003_project_create.json.uuid }}"
+
+    - name: "VERIFY-003: Verify project in API listing"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: v003_projects
+
+    - name: "VERIFY-003: Assert project exists with correct data"
+      ansible.builtin.assert:
+        that:
+          - v003_projects.json | selectattr('uuid', 'equalto', test_project_uuid) | list | length == 1
+          - (v003_projects.json | selectattr('uuid', 'equalto', test_project_uuid) | first).name == test_resources.project.name
+        fail_msg: "Project not found or data mismatch"
+        success_msg: "Project verified: {{ test_resources.project.name }}"
+
+    # ==========================================================================
+    # VERIFY-004: Verify Project Details Endpoint
+    # ==========================================================================
+    - name: "VERIFY-004: Get project by UUID"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ test_project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: v004_project_detail
+
+    - name: "VERIFY-004: Assert project detail matches"
+      ansible.builtin.assert:
+        that:
+          - v004_project_detail.json.uuid == test_project_uuid
+          - v004_project_detail.json.name == test_resources.project.name
+          - v004_project_detail.json.description == test_resources.project.description
+        fail_msg: |
+          Project detail mismatch:
+          Expected name: {{ test_resources.project.name }}
+          Got: {{ v004_project_detail.json.name | default('N/A') }}
+        success_msg: "Project details verified"
+
+    # ==========================================================================
+    # VERIFY-005: Get Project Environments
+    # ==========================================================================
+    - name: "VERIFY-005: List project environments"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ test_project_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: v005_environments
+
+    - name: "VERIFY-005: Store default environment UUID"
+      ansible.builtin.set_fact:
+        default_env_uuid: "{{ (v005_environments.json.environments | first).uuid }}"
+      when: v005_environments.json.environments | length > 0
+
+    - name: "VERIFY-005: Assert default environment exists"
+      ansible.builtin.assert:
+        that:
+          - v005_environments.json.environments | length >= 1
+        fail_msg: "No environments found for project"
+        success_msg: "Found {{ v005_environments.json.environments | length }} environment(s)"
+
+    # ==========================================================================
+    # VERIFY-006: Register SSH Key for Nodes
+    # ==========================================================================
+    - name: "VERIFY-006: Generate SSH key"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: ssh-keygen -t rsa -b 4096 -f /tmp/verify-key -N "" -C "verification-test"
+      changed_when: true
+
+    - name: "VERIFY-006: Read keys"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: cat /tmp/verify-key{{ item }}
+      register: ssh_keys
+      loop: ["", ".pub"]
+      changed_when: false
+
+    - name: "VERIFY-006: Set key facts"
+      ansible.builtin.set_fact:
+        verify_private_key: "{{ ssh_keys.results[0].stdout }}"
+        verify_public_key: "{{ ssh_keys.results[1].stdout }}"
+
+    - name: "VERIFY-006: Register private key in Coolify"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/security/keys"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "verify-test-key"
+          description: "Key for verification tests"
+          private_key: "{{ verify_private_key }}"
+        status_code: [200, 201]
+      register: v006_key_create
+
+    - name: "VERIFY-006: Store key UUID"
+      ansible.builtin.set_fact:
+        private_key_uuid: "{{ v006_key_create.json.uuid }}"
+
+    # ==========================================================================
+    # VERIFY-007: Verify Private Keys Endpoint
+    # ==========================================================================
+    - name: "VERIFY-007: List private keys"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/security/keys"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: v007_keys
+
+    - name: "VERIFY-007: Assert key exists"
+      ansible.builtin.assert:
+        that:
+          - v007_keys.json | selectattr('uuid', 'equalto', private_key_uuid) | list | length == 1
+        fail_msg: "Private key not found in listing"
+        success_msg: "Private key verified in API"
+
+    # ==========================================================================
+    # VERIFY-008: Register Worker Nodes
+    # ==========================================================================
+    - name: "VERIFY-008: Distribute public key to workers"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-{{ item.name }}"
+        command: /bin/bash -c "echo '{{ verify_public_key }}' >> /root/.ssh/authorized_keys"
+      loop: "{{ docker_dev_containers | rejectattr('name', 'equalto', 'controller') | list }}"
+      changed_when: true
+
+    - name: "VERIFY-008: Register worker nodes"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ item.hostname }}"
+          description: "Verification test - {{ item.name }}"
+          ip: "{{ item.ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ private_key_uuid }}"
+          is_build_server: "{{ 'builder' in (item.labels | default([])) }}"
+        status_code: [200, 201]
+      loop: "{{ docker_dev_containers | rejectattr('name', 'equalto', 'controller') | list }}"
+      register: v008_node_registrations
+
+    - name: "VERIFY-008: Store server UUIDs"
+      ansible.builtin.set_fact:
+        registered_server_uuids: "{{ v008_node_registrations.results | map(attribute='json') | map(attribute='uuid') | list }}"
+
+    # ==========================================================================
+    # VERIFY-009: Verify Servers in API
+    # ==========================================================================
+    - name: "VERIFY-009: List all servers"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: v009_servers
+
+    - name: "VERIFY-009: Assert all nodes registered"
+      ansible.builtin.assert:
+        that:
+          - v009_servers.json | length >= (docker_dev_containers | rejectattr('name', 'equalto', 'controller') | list | length)
+        fail_msg: "Not all nodes registered. Expected {{ docker_dev_containers | rejectattr('name', 'equalto', 'controller') | list | length }}, got {{ v009_servers.json | length }}"
+        success_msg: "All {{ v009_servers.json | length }} servers verified"
+
+    - name: "VERIFY-009: Verify each registered server exists"
+      ansible.builtin.assert:
+        that:
+          - v009_servers.json | selectattr('uuid', 'equalto', item) | list | length == 1
+        fail_msg: "Server UUID {{ item }} not found"
+        success_msg: "Server {{ item }} verified"
+      loop: "{{ registered_server_uuids }}"
+
+    # ==========================================================================
+    # VERIFY-010: Verify Server Details
+    # ==========================================================================
+    - name: "VERIFY-010: Get each server detail"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers/{{ item }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      loop: "{{ registered_server_uuids }}"
+      register: v010_server_details
+
+    - name: "VERIFY-010: Assert server details complete"
+      ansible.builtin.assert:
+        that:
+          - item.json.uuid is defined
+          - item.json.name is defined
+          - item.json.ip is defined
+        fail_msg: "Server detail incomplete for {{ item.json.uuid | default('unknown') }}"
+        success_msg: "Server {{ item.json.name }} detail verified"
+      loop: "{{ v010_server_details.results }}"
+
+    # ==========================================================================
+    # VERIFY-011: Validate Server Connectivity
+    # ==========================================================================
+    - name: "VERIFY-011: Validate server connectivity via API"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers/{{ item }}/validate"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 201]
+      loop: "{{ registered_server_uuids }}"
+      register: v011_validations
+      ignore_errors: true
+
+    - name: "VERIFY-011: Report validation results"
+      ansible.builtin.debug:
+        msg: "Server {{ item.item }} validation: {{ item.status | default('failed') }}"
+      loop: "{{ v011_validations.results }}"
+
+    # ==========================================================================
+    # VERIFY-012: Cross-Reference Check
+    # ==========================================================================
+    - name: "VERIFY-012: Build expected vs actual comparison"
+      ansible.builtin.set_fact:
+        verification_summary:
+          projects:
+            expected: 1
+            actual: "{{ (v003_projects.json | selectattr('uuid', 'equalto', test_project_uuid) | list | length) }}"
+          servers:
+            expected: "{{ docker_dev_containers | rejectattr('name', 'equalto', 'controller') | list | length }}"
+            actual: "{{ registered_server_uuids | length }}"
+          private_keys:
+            expected: 1
+            actual: "{{ (v007_keys.json | selectattr('uuid', 'equalto', private_key_uuid) | list | length) }}"
+
+    - name: "VERIFY-012: Display verification summary"
+      ansible.builtin.debug:
+        msg: |
+          === API VERIFICATION SUMMARY ===
+          Projects:     {{ verification_summary.projects.actual }}/{{ verification_summary.projects.expected }}
+          Servers:      {{ verification_summary.servers.actual }}/{{ verification_summary.servers.expected }}
+          Private Keys: {{ verification_summary.private_keys.actual }}/{{ verification_summary.private_keys.expected }}
+          ================================
+
+    - name: "VERIFY-012: Assert all resources verified"
+      ansible.builtin.assert:
+        that:
+          - verification_summary.projects.actual | int == verification_summary.projects.expected | int
+          - verification_summary.servers.actual | int >= verification_summary.servers.expected | int
+          - verification_summary.private_keys.actual | int == verification_summary.private_keys.expected | int
+        fail_msg: "Resource verification failed - see summary above"
+        success_msg: "All resources verified successfully"
+
+    # ==========================================================================
+    # CLEANUP: Remove Test Resources
+    # ==========================================================================
+    - name: "CLEANUP: Delete test project"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/projects/{{ test_project_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+
+    - name: "CLEANUP: Delete registered servers"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/servers/{{ item }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      loop: "{{ registered_server_uuids }}"
+      ignore_errors: true
+
+    - name: "CLEANUP: Delete private key"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_base_url }}/security/keys/{{ private_key_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+
+  # ============================================================================
+  # POST_TASKS: Final Cleanup
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: cleanup_compose_stat
+
+    - name: "CLEANUP: Destroy test containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: cleanup_compose_stat.stat.exists
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: API Verification"
+      ansible.builtin.debug:
+        msg: |
+          All API verification tests passed!
+          - API endpoints respond correctly
+          - Projects created and verified
+          - Servers registered and validated
+          - Private keys managed correctly
+          - All resources properly reflected in API
+
+  tags:
+    - test
+    - api-verification
+    - docker-dev

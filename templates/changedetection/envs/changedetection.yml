@@ -1,0 +1,19 @@
+# Environment variables for changedetection
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+BASE_URL: "${SERVICE_URL_CHANGEDETECTION}"
+DISABLE_VERSION_CHECK: "true"
+FETCH_WORKERS: "10"
+HIDE_REFERER: "true"
+LOGGER_LEVEL: "DEBUG"
+MAX_CONCURRENT_CHROME_PROCESSES: "10"
+MINIMUM_SECONDS_RECHECK_TIME: "3"
+PGID: "1000"
+PLAYWRIGHT_DRIVER_URL: "ws://browser-sockpuppet-chrome:3000"
+PUID: "1000"
+SCREEN_DEPTH: "16"
+SCREEN_HEIGHT: "1024"
+SCREEN_WIDTH: "1920"
+SCREENSHOT_MAX_HEIGHT: "16000"
+TZ: "UTC"

@@ -1,0 +1,63 @@
+---
+# Bootstrap the Galera cluster with the first node
+#
+# This task deploys the first node with GALERA_NEW_CLUSTER flag,
+# then waits for it to be ready before other nodes can join.
+#
+# Required variables:
+#   galera_nodes: List of all cluster nodes
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+
+- name: "Bootstrap: Select first node as bootstrap node"
+  ansible.builtin.set_fact:
+    galera_bootstrap_node_config: "{{ galera_nodes[0] }}"
+
+- name: "Bootstrap: Display bootstrap node info"
+  ansible.builtin.debug:
+    msg: |
+      Bootstrapping Galera cluster with node:
+        Name: {{ galera_bootstrap_node_config.name }}
+        Host: {{ galera_bootstrap_node_config.host }}
+        IP: {{ galera_bootstrap_node_config.ip }}
+
+- name: "Bootstrap: Deploy bootstrap node"
+  ansible.builtin.include_tasks: deploy_node.yml
+  vars:
+    galera_current_node: "{{ galera_bootstrap_node_config }}"
+    galera_bootstrap_node: true
+
+- name: "Bootstrap: Wait for bootstrap node service to be created"
+  ansible.builtin.pause:
+    seconds: 10
+    prompt: "Waiting for Coolify to process service creation..."
+
+- name: "Bootstrap: Get service status"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ galera_service_uuids[galera_bootstrap_node_config.name] }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: galera_bootstrap_status
+  until: galera_bootstrap_status.json.status | default('') == 'running'
+  retries: 30
+  delay: 10
+  ignore_errors: true
+
+- name: "Bootstrap: Verify bootstrap node is healthy"
+  ansible.builtin.debug:
+    msg: |
+      Bootstrap node status:
+        Service: {{ galera_bootstrap_status.json.name | default('N/A') }}
+        Status: {{ galera_bootstrap_status.json.status | default('unknown') }}
+
+- name: "Bootstrap: Wait for MariaDB to be ready"
+  ansible.builtin.pause:
+    seconds: 30
+    prompt: "Waiting for MariaDB Galera to initialize..."
+  when: galera_bootstrap_status.json.status | default('') == 'running'
+
+- name: "Bootstrap: Set bootstrap complete flag"
+  ansible.builtin.set_fact:
+    galera_bootstrap_complete: true

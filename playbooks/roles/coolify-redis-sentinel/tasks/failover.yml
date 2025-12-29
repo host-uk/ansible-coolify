@@ -1,0 +1,56 @@
+---
+# Trigger manual failover in Redis Sentinel cluster
+# Promotes a replica to master
+#
+# Required variables:
+#   redis_nodes: List of all cluster nodes
+#   redis_master_name: Sentinel master name
+
+- name: "Get current master from sentinel"
+  ansible.builtin.command:
+    cmd: >
+      docker exec sentinel-{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).name }}
+      redis-cli -p 26379 sentinel get-master-addr-by-name {{ redis_master_name }}
+  register: redis_current_master
+  changed_when: false
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).host }}"
+
+- name: "Display current master"
+  ansible.builtin.debug:
+    msg: |
+      Current Redis Master:
+        {{ redis_current_master.stdout_lines | join(' : ') }}
+
+- name: "Trigger failover"
+  ansible.builtin.command:
+    cmd: >
+      docker exec sentinel-{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).name }}
+      redis-cli -p 26379 sentinel failover {{ redis_master_name }}
+  register: redis_failover_result
+  changed_when: true
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).host }}"
+
+- name: "Wait for failover to complete"
+  ansible.builtin.pause:
+    seconds: 10
+    prompt: "Waiting for failover to complete..."
+
+- name: "Get new master from sentinel"
+  ansible.builtin.command:
+    cmd: >
+      docker exec sentinel-{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).name }}
+      redis-cli -p 26379 sentinel get-master-addr-by-name {{ redis_master_name }}
+  register: redis_new_master
+  changed_when: false
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).host }}"
+  retries: 5
+  delay: 5
+  until: redis_new_master.stdout_lines[0] | default('') != redis_current_master.stdout_lines[0] | default('')
+
+- name: "Display failover result"
+  ansible.builtin.debug:
+    msg: |
+      Redis Sentinel Failover Complete:
+        Previous Master: {{ redis_current_master.stdout_lines | join(':') }}
+        New Master: {{ redis_new_master.stdout_lines | join(':') }}
+        Failover Status: {{ 'SUCCESS' if redis_new_master.stdout_lines[0] != redis_current_master.stdout_lines[0] else 'SAME MASTER' }}

@@ -1,0 +1,45 @@
+---
+# Coolify PostgreSQL Patroni Role - Main Entry Point
+#
+# This role deploys a PostgreSQL Patroni Cluster via Coolify Services API.
+# All nodes form a high-availability cluster with automatic failover via etcd.
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/postgresql/deploy.yml
+#
+# Variables:
+#   postgresql_nodes: List of nodes with name, host, ip, role
+#   postgresql_hostname: Service discovery hostname (default: db.postgres.host.uk.com)
+#   postgresql_scope: Patroni cluster scope
+#
+# The role can be included with specific task files:
+#   tasks_from: deploy_node.yml       - Deploy single node
+#   tasks_from: bootstrap_cluster.yml - Bootstrap primary node
+#   tasks_from: join_cluster.yml      - Join replica to cluster
+#   tasks_from: health_check.yml      - Verify cluster health
+#   tasks_from: switchover.yml        - Trigger manual switchover
+
+- name: Ensure PostgreSQL state directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - state/postgresql
+    - state/postgresql/backups
+  delegate_to: localhost
+  run_once: true
+
+- name: Display PostgreSQL Patroni cluster configuration
+  ansible.builtin.debug:
+    msg: |
+      PostgreSQL Patroni Cluster Configuration:
+        Cluster Name: {{ postgresql_cluster_name }}
+        Patroni Scope: {{ postgresql_scope }}
+        PostgreSQL Version: {{ postgresql_version }}
+        Service Hostname: {{ postgresql_hostname }}
+        Nodes:
+      {% for node in postgresql_nodes %}
+          - {{ node.name }} ({{ node.ip }}) - {{ node.role }}
+      {% endfor %}
+        Primary IP: {{ postgresql_primary_ip }}

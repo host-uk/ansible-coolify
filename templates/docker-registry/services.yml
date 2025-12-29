@@ -1,0 +1,35 @@
+# Service definition for: docker-registry
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=docker-registry -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: docker-registry
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          registry:
+            image: 'registry:2'
+            environment:
+              - SERVICE_URL_REGISTRY_5000
+              - REGISTRY_AUTH=htpasswd
+              - REGISTRY_AUTH_HTPASSWD_REALM=Registry
+              - REGISTRY_AUTH_HTPASSWD_PATH=/auth/registry.password
+              - REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY=/data
+            volumes:
+              -
+                type: bind
+                source: ./auth/registry.password
+                target: /auth/registry.password
+              -
+                type: bind
+                source: ./config/config.yml
+                target: /etc/docker/registry/config.yml
+              -
+                type: bind
+                source: ./data
+                target: /data
+

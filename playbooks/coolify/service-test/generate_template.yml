@@ -1,0 +1,108 @@
+---
+# Generate Template from Working Service
+# Included by test_service.yml on successful test
+#
+# Expects variables:
+#   service_name: Service type name
+#   test_service_uuid: UUID of the deployed service
+#   coolify_api_url: API URL
+#   coolify_api_token: API token
+#   templates_path: Base path for templates
+
+- name: "TEMPLATE: Get service details"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: template_service_details
+
+- name: "TEMPLATE: Get service environment variables"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}/envs"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: [200, 404]
+  register: template_service_envs
+
+- name: "TEMPLATE: Filter user-configurable env vars"
+  ansible.builtin.set_fact:
+    template_env_vars: >-
+      {{
+        template_service_envs.json
+        | default([])
+        | rejectattr('is_coolify', 'equalto', true)
+        | list
+      }}
+
+- name: "TEMPLATE: Create template directory"
+  ansible.builtin.file:
+    path: "{{ templates_path }}/{{ service_name }}"
+    state: directory
+    mode: '0755'
+
+- name: "TEMPLATE: Create envs subdirectory"
+  ansible.builtin.file:
+    path: "{{ templates_path }}/{{ service_name }}/envs"
+    state: directory
+    mode: '0755'
+
+- name: "TEMPLATE: Save template metadata"
+  ansible.builtin.copy:
+    content: |
+      # Template: {{ service_name }}
+      # Auto-generated from service test
+      # Date: {{ lookup('pipe', 'date -Iseconds') }}
+
+      name: {{ service_name }}
+      service_type: {{ service_name }}
+      source: automated-test
+      tested: true
+      test_date: {{ lookup('pipe', 'date -Iseconds') }}
+    dest: "{{ templates_path }}/{{ service_name }}/template.yml"
+    mode: '0644'
+
+- name: "TEMPLATE: Save service definition"
+  ansible.builtin.copy:
+    content: |
+      # Service definition for: {{ service_name }}
+      # Auto-generated from successful service test
+      #
+      # Apply with:
+      #   ansible-playbook playbooks/coolify/template/apply.yml \
+      #     -e template_name={{ service_name }} -e project=xxx -e env_name=yyy
+
+      services:
+        - service_type: {{ service_name }}
+          description: "{{ template_service_details.json.description | default('') }}"
+          connect_to_docker_network: {{ template_service_details.json.connect_to_docker_network | default(false) | lower }}
+      {% if template_service_details.json.docker_compose_raw is defined and template_service_details.json.docker_compose_raw %}
+          docker_compose_raw: |
+      {{ template_service_details.json.docker_compose_raw | indent(8, first=true) }}
+      {% endif %}
+    dest: "{{ templates_path }}/{{ service_name }}/services.yml"
+    mode: '0644'
+
+- name: "TEMPLATE: Save environment variables"
+  ansible.builtin.copy:
+    content: |
+      # Environment variables for {{ service_name }}
+      # User-configurable values (Coolify-managed vars excluded)
+      # Auto-generated from successful service test
+
+      {% for env in template_env_vars %}
+      {{ env.key }}: "{{ env.value | default('') }}"
+      {% endfor %}
+    dest: "{{ templates_path }}/{{ service_name }}/envs/{{ service_name }}.yml"
+    mode: '0600'
+  when: template_env_vars | length > 0
+
+- name: "TEMPLATE: Display success"
+  ansible.builtin.debug:
+    msg: |
+      Template created: templates/{{ service_name }}/
+        - template.yml
+        - services.yml
+        - envs/{{ service_name }}.yml ({{ template_env_vars | length }} vars)

@@ -1,0 +1,73 @@
+---
+# Check Redis Sentinel Cluster Status
+#
+# This playbook checks the health and status of an existing Redis Sentinel cluster.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/redis/status.yml
+
+- name: Check Redis Sentinel Cluster Status
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Redis Sentinel role defaults
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: main.yml
+
+    - name: Check cluster health
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: health_check.yml
+      vars:
+        redis_health_fail_on_error: false
+
+    - name: Get all Redis services from Coolify
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: redis_all_services
+
+    - name: Filter Redis services
+      ansible.builtin.set_fact:
+        redis_services: >-
+          {{
+            redis_all_services.json
+            | selectattr('name', 'search', '^redis-')
+            | list
+          }}
+
+    - name: Display cluster status
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                         REDIS SENTINEL CLUSTER STATUS
+          ====================================================================
+            Cluster Name: {{ redis_cluster_name }}
+            Master Name: {{ redis_master_name }}
+
+            Configured Nodes:
+          {% for node in redis_nodes %}
+              - {{ node.name }} ({{ node.ip }}) - {{ node.role }}
+          {% endfor %}
+
+            Coolify Services Found: {{ redis_services | length }}
+          {% for svc in redis_services %}
+              - {{ svc.name }}: {{ svc.status | default('unknown') }}
+          {% endfor %}
+
+            Health Summary:
+              Master Healthy: {{ redis_health_summary.master_healthy | default('unknown') }}
+              Sentinel Reachable: {{ redis_health_summary.sentinel_reachable | default('unknown') }}
+              Connected Replicas: {{ redis_health_summary.connected_replicas | default('?') }}/{{ redis_health_summary.expected_replicas | default('?') }}
+          ====================================================================

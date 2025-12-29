@@ -1,0 +1,32 @@
+# Service definition for: grafana
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=grafana -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: grafana
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          grafana:
+            image: grafana/grafana-oss
+            environment:
+              - SERVICE_URL_GRAFANA_3000
+              - 'GF_SERVER_ROOT_URL=${SERVICE_URL_GRAFANA}'
+              - 'GF_SERVER_DOMAIN=${SERVICE_URL_GRAFANA}'
+              - 'GF_SECURITY_ADMIN_PASSWORD=${SERVICE_PASSWORD_GRAFANA}'
+            volumes:
+              - 'grafana-data:/var/lib/grafana'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:3000/api/health'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

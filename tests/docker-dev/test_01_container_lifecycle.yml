@@ -23,16 +23,30 @@
     # SETUP
     # ==========================================================================
     - name: "SETUP: Verify Docker is available"
-      ansible.builtin.command: docker info
+      community.docker.docker_host_info:
       register: docker_info
-      changed_when: false
-      failed_when: docker_info.rc != 0
+      failed_when: docker_info is failed
 
-    - name: "SETUP: Ensure clean state before tests"
-      ansible.builtin.shell: |
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v 2>/dev/null || true
-        rm -rf {{ docker_dev_compose_path }} {{ docker_dev_logs_path }} 2>/dev/null || true
-      changed_when: true
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
       ignore_errors: true
 
     # ==========================================================================
@@ -85,16 +99,16 @@
     # CL-003: Network Connectivity
     # ==========================================================================
     - name: "CL-003: Test inter-container connectivity (controller -> worker)"
-      ansible.builtin.command: >
-        docker exec {{ docker_dev_name_prefix }}-controller ping -c 1 -W 2 172.29.0.20
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-controller"
+        command: ping -c 1 -W 2 172.29.0.20
       register: ping_worker
-      changed_when: false
 
     - name: "CL-003: Test inter-container connectivity (controller -> builder)"
-      ansible.builtin.command: >
-        docker exec {{ docker_dev_name_prefix }}-controller ping -c 1 -W 2 172.29.0.30
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-controller"
+        command: ping -c 1 -W 2 172.29.0.30
       register: ping_builder
-      changed_when: false
 
     - name: "CL-003: Assert network connectivity works"
       ansible.builtin.assert:
@@ -176,9 +190,9 @@
     # CL-007: Stop/Start Cycle
     # ==========================================================================
     - name: "CL-007: Stop containers"
-      ansible.builtin.command: >
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml stop
-      changed_when: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: stopped
 
     - name: "CL-007: Verify containers stopped"
       ansible.builtin.command: >
@@ -194,9 +208,9 @@
         success_msg: "Container stopped successfully"
 
     - name: "CL-007: Start containers"
-      ansible.builtin.command: >
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml start
-      changed_when: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: present
 
     - name: "CL-007: Wait for containers to be healthy again"
       ansible.builtin.command: >
@@ -219,9 +233,10 @@
   # ============================================================================
   post_tasks:
     - name: "CLEANUP: Destroy test containers"
-      ansible.builtin.command: >
-        docker compose -f {{ docker_dev_compose_path }}/docker-compose.yml down -v
-      changed_when: true
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
       ignore_errors: true
 
     - name: "CLEANUP: Remove test directories"

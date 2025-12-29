@@ -1,0 +1,30 @@
+# Service definition for: statusnook
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=statusnook -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: statusnook
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          statusnook:
+            environment:
+              - SERVICE_URL_STATUSNOOK_8000
+            volumes:
+              - 'statusnook-data:/app/statusnook-data'
+            image: goksan/statusnook
+            healthcheck:
+              test:
+                - CMD
+                - wget
+                - '-q'
+                - '--spider'
+                - 'http://127.0.0.1:8000'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

@@ -1,0 +1,114 @@
+---
+# Deploy One-Click App with Shared Infrastructure
+#
+# This playbook deploys Coolify one-click services and automatically
+# configures them to use shared infrastructure (Galera, Redis, PostgreSQL).
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/oneclick/deploy.yml \
+#     -e oneclick_service_type=chatwoot \
+#     -e oneclick_app_name=my-chatwoot
+#
+# Required Variables:
+#   oneclick_service_type: Type of service (chatwoot, n8n, ghost, wordpress, etc.)
+#   oneclick_app_name: Unique name for the app instance
+#
+# Optional Variables:
+#   oneclick_server_uuid: Target server UUID (defaults to first available)
+#   oneclick_project_name: Project name (default: oneclick-apps)
+#   oneclick_auto_detect_database: Auto-detect database requirements (default: true)
+#   oneclick_extra_env_vars: Additional environment variables as dict
+
+- name: Deploy One-Click App with Shared Infrastructure
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - oneclick_service_type is defined
+          - oneclick_service_type | length > 0
+          - oneclick_app_name is defined
+          - oneclick_app_name | length > 0
+        fail_msg: |
+          Required variables missing. Usage:
+            ansible-playbook playbooks/coolify/oneclick/deploy.yml \
+              -e oneclick_service_type=chatwoot \
+              -e oneclick_app_name=my-chatwoot
+
+    - name: Display deployment info
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    ONE-CLICK APP DEPLOYMENT
+          ====================================================================
+            Service Type: {{ oneclick_service_type }}
+            App Name: {{ oneclick_app_name }}
+
+            This will:
+              1. Detect database requirements for {{ oneclick_service_type }}
+              2. Create database/user in shared infrastructure if needed
+              3. Configure environment variables
+              4. Deploy via Coolify API
+          ====================================================================
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Get available servers
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: oneclick_servers
+      when: oneclick_server_uuid is not defined
+
+    - name: Select first available server
+      ansible.builtin.set_fact:
+        oneclick_server_uuid: "{{ oneclick_servers.json | first | attr('uuid') }}"
+      when:
+        - oneclick_server_uuid is not defined
+        - oneclick_servers.json | length > 0
+
+    - name: Fail if no server available
+      ansible.builtin.fail:
+        msg: "No server available for deployment. Register a server first."
+      when: oneclick_server_uuid is not defined or oneclick_server_uuid == ''
+
+    - name: Include One-Click App role
+      ansible.builtin.include_role:
+        name: coolify-oneclick-app
+        tasks_from: main.yml
+
+    - name: Deploy the one-click app
+      ansible.builtin.include_role:
+        name: coolify-oneclick-app
+        tasks_from: deploy.yml
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    ONE-CLICK APP DEPLOYED
+          ====================================================================
+            Service: {{ oneclick_service_type }}
+            Name: {{ oneclick_app_name }}
+            UUID: {{ oneclick_service_uuid }}
+
+            Database:
+              Type: {{ oneclick_database_type }}
+              Name: {{ oneclick_db_name | default('N/A') }}
+              User: {{ oneclick_db_user | default('N/A') }}
+              Password: (stored in state/oneclick/{{ oneclick_app_name }}/db_password.txt)
+
+            Redis: {{ 'Configured' if oneclick_requires_redis | default(false) else 'Not required' }}
+
+            Access your app in the Coolify dashboard.
+          ====================================================================

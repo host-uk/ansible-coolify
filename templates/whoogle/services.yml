@@ -1,0 +1,27 @@
+# Service definition for: whoogle
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=whoogle -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: whoogle
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          whoogle:
+            image: 'benbusby/whoogle-search:latest'
+            environment:
+              - SERVICE_URL_WHOOGLE_5000
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:5000'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

@@ -1,0 +1,9 @@
+# Template: gitea-with-mariadb
+# Auto-generated from service test
+# Date: 2025-12-29T07:40:42+00:00
+
+name: gitea-with-mariadb
+service_type: gitea-with-mariadb
+source: automated-test
+tested: true
+test_date: 2025-12-29T07:40:42+00:00

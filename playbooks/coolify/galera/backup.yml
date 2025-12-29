@@ -1,0 +1,138 @@
+---
+# Backup Galera Cluster
+#
+# Creates a mariabackup of the cluster from one node.
+# Galera allows hot backups without locking.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/backup.yml
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/backup.yml -e backup_node=app-server-2.lan
+#
+# Options:
+#   backup_node: Node to backup from (default: first slave node)
+#   backup_type: full or incremental (default: full)
+
+- name: Backup Galera Cluster
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  vars:
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    backup_filename: "galera_backup_{{ backup_timestamp }}.sql.gz"
+
+  tasks:
+    - name: Include Galera role defaults
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: main.yml
+
+    - name: Ensure backup directory exists
+      ansible.builtin.file:
+        path: "{{ galera_backup_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+
+    - name: Select backup node
+      ansible.builtin.set_fact:
+        galera_backup_node: >-
+          {{
+            backup_node | default(
+              (galera_nodes | selectattr('role', 'equalto', 'slave') | first | default(galera_nodes[0])).host
+            )
+          }}
+
+    - name: Find node configuration
+      ansible.builtin.set_fact:
+        galera_backup_node_config: >-
+          {{ galera_nodes | selectattr('host', 'equalto', galera_backup_node) | first | default({}) }}
+
+    - name: Display backup info
+      ansible.builtin.debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════════╗
+          ║                    GALERA BACKUP                             ║
+          ╠══════════════════════════════════════════════════════════════╣
+          ║  Backup Node: {{ galera_backup_node_config.name | default('?') }} ({{ galera_backup_node }})
+          ║  Backup File: {{ backup_filename }}
+          ║  Destination: {{ galera_backup_dir }}/{{ backup_filename }}
+          ╚══════════════════════════════════════════════════════════════╝
+
+    - name: Create backup using mysqldump
+      ansible.builtin.shell: |
+        docker exec galera-{{ galera_backup_node_config.name }} \
+          mariadb-dump \
+          -u root \
+          -p{{ galera_root_password }} \
+          --all-databases \
+          --single-transaction \
+          --routines \
+          --triggers \
+          --events \
+          --add-drop-database \
+          2>/dev/null | gzip > /tmp/{{ backup_filename }}
+      delegate_to: "{{ galera_backup_node }}"
+      register: backup_result
+
+    - name: Fetch backup to local state
+      ansible.builtin.fetch:
+        src: "/tmp/{{ backup_filename }}"
+        dest: "{{ galera_backup_dir }}/{{ backup_filename }}"
+        flat: true
+      delegate_to: "{{ galera_backup_node }}"
+
+    - name: Remove remote backup file
+      ansible.builtin.file:
+        path: "/tmp/{{ backup_filename }}"
+        state: absent
+      delegate_to: "{{ galera_backup_node }}"
+
+    - name: Get backup file size
+      ansible.builtin.stat:
+        path: "{{ galera_backup_dir }}/{{ backup_filename }}"
+      register: backup_stat
+      delegate_to: localhost
+
+    - name: Record backup metadata
+      ansible.builtin.copy:
+        content: |
+          timestamp: {{ backup_timestamp }}
+          filename: {{ backup_filename }}
+          size: {{ backup_stat.stat.size | default(0) }}
+          source_node: {{ galera_backup_node_config.name }}
+          source_host: {{ galera_backup_node }}
+          cluster_name: {{ galera_cluster_name }}
+          mariadb_version: {{ galera_mariadb_version }}
+        dest: "{{ galera_backup_dir }}/{{ backup_filename }}.meta"
+        mode: '0600'
+      delegate_to: localhost
+
+    - name: Clean up old backups
+      ansible.builtin.find:
+        paths: "{{ galera_backup_dir }}"
+        patterns: "galera_backup_*.sql.gz"
+        age: "{{ galera_backup_retention_days }}d"
+      register: old_backups
+      delegate_to: localhost
+
+    - name: Remove old backups
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      delegate_to: localhost
+
+    - name: Display backup result
+      ansible.builtin.debug:
+        msg: |
+          ✓ Backup complete!
+
+          File: {{ galera_backup_dir }}/{{ backup_filename }}
+          Size: {{ (backup_stat.stat.size | default(0) / 1024 / 1024) | round(2) }} MB
+
+          To restore:
+            ansible-playbook playbooks/coolify/galera/restore.yml \
+              -e backup_file={{ backup_filename }}

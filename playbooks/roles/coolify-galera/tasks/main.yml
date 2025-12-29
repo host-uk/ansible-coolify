@@ -1,0 +1,46 @@
+---
+# Coolify Galera Role - Main Entry Point
+#
+# This role deploys a MariaDB Galera Cluster via Coolify Services API.
+# All nodes form a synchronous multi-master cluster with automatic failover.
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/galera/deploy.yml
+#
+# Variables:
+#   galera_nodes: List of nodes with name, host, ip, role
+#   galera_hostname: Service discovery hostname (default: db.host.uk.com)
+#   galera_is_initial_deploy: Set to true for first deployment
+#
+# The role can be included with specific task files:
+#   tasks_from: deploy_node.yml     - Deploy single node
+#   tasks_from: bootstrap_cluster.yml - Bootstrap first node
+#   tasks_from: join_cluster.yml    - Join node to cluster
+#   tasks_from: health_check.yml    - Verify cluster health
+#   tasks_from: configure_hosts.yml - Configure /etc/hosts
+#   tasks_from: backup.yml          - Backup cluster
+#   tasks_from: restore.yml         - Restore from backup
+
+- name: Ensure Galera state directory exists
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0700'
+  loop:
+    - state/galera
+    - state/galera/backups
+  delegate_to: localhost
+  run_once: true
+
+- name: Display Galera cluster configuration
+  ansible.builtin.debug:
+    msg: |
+      Galera Cluster Configuration:
+        Cluster Name: {{ galera_cluster_name }}
+        MariaDB Version: {{ galera_mariadb_version }}
+        Service Hostname: {{ galera_hostname }}
+        Nodes:
+      {% for node in galera_nodes %}
+          - {{ node.name }} ({{ node.ip }}) - {{ node.role }}
+      {% endfor %}
+        Cluster Address: {{ galera_cluster_address }}

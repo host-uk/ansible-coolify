@@ -1,0 +1,9 @@
+# Environment variables for logto
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+LOGTO_ADMIN_ENDPOINT: "http://logto-admin-x4o8g00og4oc8c8c48044wo8.185.214.222.129.sslip.io"
+LOGTO_ENDPOINT: "http://logto-x4o8g00og4oc8c8c48044wo8.185.214.222.129.sslip.io"
+POSTGRES_DB: "logto"
+POSTGRES_PASSWORD: "${SERVICE_PASSWORD_POSTGRES}"
+POSTGRES_USER: "${SERVICE_USER_POSTGRES}"

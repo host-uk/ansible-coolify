@@ -1,0 +1,100 @@
+---
+# Trigger manual switchover in PostgreSQL Patroni cluster
+# Promotes a replica to primary (planned failover)
+#
+# Required variables:
+#   postgresql_nodes: List of all cluster nodes
+#   postgresql_target_leader: (optional) Name of node to promote
+
+- name: "Get current cluster state from Patroni"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ postgresql_primary_node.name }}
+      curl -sf http://localhost:{{ patroni_restapi_port }}/cluster
+  register: patroni_current_state
+  changed_when: false
+  delegate_to: "{{ postgresql_primary_node.host }}"
+
+- name: "Parse current cluster state"
+  ansible.builtin.set_fact:
+    patroni_members: "{{ (patroni_current_state.stdout | from_json).members }}"
+
+- name: "Display current cluster state"
+  ansible.builtin.debug:
+    msg: |
+      Current PostgreSQL Patroni Cluster State:
+      {% for member in patroni_members %}
+        - {{ member.name }}: {{ member.role }} ({{ member.state }})
+          Host: {{ member.host }}
+          Timeline: {{ member.timeline | default('N/A') }}
+          Lag: {{ member.lag | default('0') }} bytes
+      {% endfor %}
+
+- name: "Find current leader"
+  ansible.builtin.set_fact:
+    current_leader: "{{ patroni_members | selectattr('role', 'equalto', 'leader') | first }}"
+
+- name: "Find best candidate for switchover"
+  ansible.builtin.set_fact:
+    switchover_target: >-
+      {{
+        postgresql_target_leader | default(
+          (patroni_members | rejectattr('role', 'equalto', 'leader') | selectattr('state', 'equalto', 'running') | first).name
+        )
+      }}
+
+- name: "Display switchover plan"
+  ansible.builtin.debug:
+    msg: |
+      Switchover Plan:
+        Current Leader: {{ current_leader.name }} ({{ current_leader.host }})
+        Target Leader: {{ switchover_target }}
+
+- name: "Trigger switchover via Patroni REST API"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ postgresql_primary_node.name }}
+      curl -sf -X POST http://localhost:{{ patroni_restapi_port }}/switchover
+      -H "Content-Type: application/json"
+      -d '{"leader": "{{ current_leader.name }}", "candidate": "{{ switchover_target }}"}'
+  register: switchover_result
+  changed_when: true
+  delegate_to: "{{ postgresql_primary_node.host }}"
+
+- name: "Wait for switchover to complete"
+  ansible.builtin.pause:
+    seconds: 15
+    prompt: "Waiting for switchover to complete..."
+
+- name: "Get new cluster state"
+  ansible.builtin.command:
+    cmd: >
+      docker exec patroni-{{ switchover_target }}
+      curl -sf http://localhost:{{ patroni_restapi_port }}/cluster
+  register: patroni_new_state
+  changed_when: false
+  delegate_to: "{{ (postgresql_nodes | selectattr('name', 'equalto', switchover_target) | first).host }}"
+  retries: 10
+  delay: 5
+  until: patroni_new_state.rc == 0
+
+- name: "Parse new cluster state"
+  ansible.builtin.set_fact:
+    patroni_new_members: "{{ (patroni_new_state.stdout | from_json).members }}"
+
+- name: "Find new leader"
+  ansible.builtin.set_fact:
+    new_leader: "{{ patroni_new_members | selectattr('role', 'equalto', 'leader') | first }}"
+
+- name: "Display switchover result"
+  ansible.builtin.debug:
+    msg: |
+      PostgreSQL Patroni Switchover Complete:
+        Previous Leader: {{ current_leader.name }}
+        New Leader: {{ new_leader.name }}
+        Switchover Status: {{ 'SUCCESS' if new_leader.name == switchover_target else 'UNEXPECTED LEADER' }}
+
+        New Cluster State:
+      {% for member in patroni_new_members %}
+          - {{ member.name }}: {{ member.role }} ({{ member.state }})
+      {% endfor %}

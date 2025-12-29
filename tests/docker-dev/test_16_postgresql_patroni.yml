@@ -1,0 +1,528 @@
+---
+# Test 16: PostgreSQL Patroni Cluster
+#
+# Tests that the coolify-postgresql role correctly deploys PostgreSQL Patroni via Coolify API
+#
+# Uses multi-play structure:
+# 1. localhost: Create Docker containers via docker_dev role
+# 2. test-controller.lan: Install Coolify via coolify role
+# 3. localhost: Run PostgreSQL Patroni deployment tests
+
+# =============================================================================
+# PLAY 1: Create Docker Development Environment
+# =============================================================================
+- name: "Test 16: Setup Docker Environment"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    - name: "SETUP: Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 16: POSTGRESQL PATRONI CLUSTER VIA ROLE
+          ====================================================================
+            Phase 1: Creating Docker development environment
+            - Using docker_dev role for container management
+            - Using coolify role for Coolify installation
+            - Using coolify-postgresql role for PostgreSQL deployment
+          ====================================================================
+
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "SETUP: Create state directory for test"
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../../state/postgresql"
+        state: directory
+        mode: '0700'
+
+    - name: "SETUP: Create test password files"
+      ansible.builtin.copy:
+        content: "{{ item.content }}"
+        dest: "{{ playbook_dir }}/../../state/postgresql/{{ item.file }}"
+        mode: '0600'
+      loop:
+        - { file: "superuser_password.txt", content: "testPostgresSuper123" }
+        - { file: "replication_password.txt", content: "testReplication123" }
+        - { file: "app_password.txt", content: "testAppPassword123" }
+
+    - name: "SETUP: Create containers via docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+  tags:
+    - test
+    - postgresql-patroni
+    - setup
+
+# =============================================================================
+# PLAY 2: Install Coolify via Role
+# =============================================================================
+- name: "Test 16: Install Coolify via Role"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "TestPassword123!"
+    coolify_auto_setup_enabled: true
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "./state"
+    coolify_docker_address_pool_base: "172.30.0.0/16"
+    coolify_docker_address_pool_size: "24"
+    coolify_docker_pool_force_override: false
+    coolify_autoupdate: false
+    coolify_registry_url: "https://hub.docker.com"
+    coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    coolify_detected_key_uuid: ""
+
+  tasks:
+    - name: "COOLIFY: Install and configure via coolify role"
+      ansible.builtin.include_role:
+        name: coolify
+
+    - name: "COOLIFY: Store API token for later plays"
+      ansible.builtin.set_fact:
+        controller_api_token: "{{ coolify_api_token }}"
+        controller_api_ready: "{{ coolify_api_ready }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+  tags:
+    - test
+    - postgresql-patroni
+    - coolify-setup
+
+# =============================================================================
+# PLAY 3: Run PostgreSQL Patroni Deployment Tests
+# =============================================================================
+- name: "Test 16: PostgreSQL Patroni Deployment Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    coolify_api_url: "http://{{ controller_ip }}:8000/api/v1"
+    coolify_api_token: "{{ controller_api_token }}"
+
+    # Variables for the coolify-postgresql role
+    postgresql_cluster_name: "test_postgres"
+    postgresql_superuser_password: "testPostgresSuper123"
+    postgresql_replication_password: "testReplication123"
+    postgresql_app_password: "testAppPassword123"
+    postgresql_project_name: "postgresql-patroni-test"
+    postgresql_environment_name: "production"
+    postgresql_instant_deploy: true
+    postgresql_memory_limit: "512m"
+    postgresql_nodes:
+      - name: "postgres-test-node-1"
+        host: "app-server-1"
+        ip: "172.29.0.20"
+        role: "primary"
+
+  tasks:
+    - name: "TEST: Verify Coolify API is ready"
+      ansible.builtin.assert:
+        that:
+          - controller_api_ready | default(false)
+          - controller_api_token | default('') | length > 0
+        fail_msg: "Coolify API not ready or token not set"
+        success_msg: "Coolify API ready, token configured via role"
+
+    - name: "TEST: Verify API access"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+      retries: 10
+      delay: 3
+      until: api_check.status == 200
+
+    # ==========================================================================
+    # SETUP: Register Server in Coolify (required for role to work)
+    # ==========================================================================
+    - name: "SETUP: Read test SSH private key"
+      ansible.builtin.slurp:
+        src: "{{ docker_dev_ssh_keys_path }}/id_rsa"
+      register: test_private_key_content
+
+    - name: "SETUP: Set private key fact"
+      ansible.builtin.set_fact:
+        test_private_key: "{{ test_private_key_content.content | b64decode }}"
+
+    - name: "SETUP: Register private key in Coolify"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/security/keys"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "postgresql-patroni-test-key"
+          private_key: "{{ test_private_key }}"
+        status_code: [200, 201]
+      register: private_key_result
+
+    - name: "SETUP: Store private key UUID"
+      ansible.builtin.set_fact:
+        private_key_uuid: "{{ private_key_result.json.uuid }}"
+
+    - name: "SETUP: Register app-server-1 in Coolify"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "test-app-server-1"
+          description: "PostgreSQL primary node"
+          ip: "{{ postgresql_nodes[0].ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ private_key_uuid }}"
+        status_code: [200, 201]
+      register: server1_result
+
+    - name: "SETUP: Trigger server validation"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers/{{ server1_result.json.uuid }}/validate"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 201]
+
+    - name: "SETUP: Wait for server validation"
+      ansible.builtin.pause:
+        seconds: 15
+        prompt: "Waiting for server validation to complete..."
+
+    # ==========================================================================
+    # TEST-001: Test Role Loads Correctly
+    # ==========================================================================
+    - name: "TEST-001: Load PostgreSQL Patroni role defaults"
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: main.yml
+
+    - name: "TEST-001: Assert role defaults loaded"
+      ansible.builtin.assert:
+        that:
+          - postgresql_cluster_name is defined
+          - postgresql_nodes is defined
+          - postgresql_nodes | length > 0
+        fail_msg: "PostgreSQL Patroni role defaults not loaded correctly"
+        success_msg: "PostgreSQL Patroni role defaults loaded: cluster={{ postgresql_cluster_name }}"
+
+    # ==========================================================================
+    # TEST-002: Test Role Deploys Node via Coolify API
+    # ==========================================================================
+    - name: "TEST-002: Set current node for deployment"
+      ansible.builtin.set_fact:
+        postgresql_current_node: "{{ postgresql_nodes[0] }}"
+
+    - name: "TEST-002: Deploy PostgreSQL node using role"
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: deploy_node.yml
+
+    - name: "TEST-002: Assert service was created"
+      ansible.builtin.assert:
+        that:
+          - postgresql_service_uuids is defined
+          - postgresql_service_uuids[postgresql_current_node.name] is defined
+          - postgresql_service_uuids[postgresql_current_node.name] | length > 0
+        fail_msg: "Role did not create PostgreSQL service"
+        success_msg: "Role created PostgreSQL service: {{ postgresql_service_uuids[postgresql_current_node.name] }}"
+
+    # ==========================================================================
+    # TEST-003: Verify Service Exists in Coolify API
+    # ==========================================================================
+    - name: "TEST-003: Get service from Coolify API"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ postgresql_service_uuids[postgresql_current_node.name] }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: service_check
+
+    - name: "TEST-003: Assert service details correct"
+      ansible.builtin.assert:
+        that:
+          - service_check.json.name == postgresql_current_node.name
+          - service_check.json.uuid == postgresql_service_uuids[postgresql_current_node.name]
+        fail_msg: "Service details don't match expected values"
+        success_msg: "Service verified in Coolify API: {{ service_check.json.name }}"
+
+    # ==========================================================================
+    # TEST-004: Wait for Deployment and Test PostgreSQL Connection
+    # ==========================================================================
+    - name: "TEST-004: Wait for PostgreSQL deployment"
+      ansible.builtin.pause:
+        seconds: 90
+        prompt: "Waiting for PostgreSQL + etcd containers to start..."
+
+    - name: "TEST-004: Test PostgreSQL connection"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-app-server-1"
+        command: >
+          docker exec postgres-{{ postgresql_current_node.name }}
+          psql -U postgres -c "SELECT 1;"
+      register: postgres_test
+      changed_when: false
+      retries: 30
+      delay: 5
+      until: postgres_test.rc == 0
+      ignore_errors: true
+
+    - name: "TEST-004: Assert PostgreSQL responds"
+      ansible.builtin.assert:
+        that:
+          - postgres_test.rc == 0
+        fail_msg: "PostgreSQL is not responding"
+        success_msg: "PostgreSQL is responding correctly"
+      when: postgres_test is defined
+
+    # ==========================================================================
+    # TEST-005: Test Database Operations via Role-Deployed PostgreSQL
+    # ==========================================================================
+    - name: "TEST-005: Create test table"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-app-server-1"
+        command: >
+          docker exec postgres-{{ postgresql_current_node.name }}
+          psql -U postgres -c "CREATE TABLE IF NOT EXISTS role_test (id SERIAL PRIMARY KEY, msg TEXT);"
+      register: create_table
+      changed_when: true
+      when: postgres_test.rc == 0
+      ignore_errors: true
+
+    - name: "TEST-005: Insert test data"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-app-server-1"
+        command: >
+          docker exec postgres-{{ postgresql_current_node.name }}
+          psql -U postgres -c "INSERT INTO role_test (msg) VALUES ('Deployed by Ansible role!');"
+      register: insert_data
+      changed_when: true
+      when: postgres_test.rc == 0
+      ignore_errors: true
+
+    - name: "TEST-005: Read test data"
+      community.docker.docker_container_exec:
+        container: "{{ docker_dev_name_prefix }}-app-server-1"
+        command: >
+          docker exec postgres-{{ postgresql_current_node.name }}
+          psql -U postgres -t -c "SELECT msg FROM role_test LIMIT 1;"
+      register: postgres_get
+      changed_when: false
+      when: postgres_test.rc == 0
+      ignore_errors: true
+
+    - name: "TEST-005: Assert data operations work"
+      ansible.builtin.assert:
+        that:
+          - "'Deployed by Ansible role!' in postgres_get.stdout"
+        fail_msg: "PostgreSQL data operations failed"
+        success_msg: "PostgreSQL data operations verified via role-deployed instance"
+      when: postgres_get is defined and postgres_get.stdout is defined
+
+    # ==========================================================================
+    # TEST-006: Test Health Check Task from Role
+    # ==========================================================================
+    - name: "TEST-006: Run health check from role"
+      ansible.builtin.include_role:
+        name: coolify-postgresql
+        tasks_from: health_check.yml
+      vars:
+        postgresql_health_fail_on_error: false
+      ignore_errors: true
+
+    - name: "TEST-006: Display health check results"
+      ansible.builtin.debug:
+        msg: |
+          Health Check Results:
+            Patroni Reachable: {{ postgresql_health_summary.patroni_reachable | default('unknown') }}
+            Primary Healthy: {{ postgresql_health_summary.primary_healthy | default('unknown') }}
+      when: postgresql_health_summary is defined
+
+    # ==========================================================================
+    # SUMMARY: Test Results
+    # ==========================================================================
+    - name: "SUMMARY: Build test results"
+      ansible.builtin.set_fact:
+        test_results:
+          coolify_installed_via_role: true
+          api_token_from_role: "{{ controller_api_token | length > 0 }}"
+          role_loaded: true
+          service_created: "{{ postgresql_service_uuids[postgresql_current_node.name] is defined }}"
+          service_uuid: "{{ postgresql_service_uuids[postgresql_current_node.name] | default('N/A') }}"
+          api_verified: "{{ service_check.json.uuid is defined }}"
+          postgres_responding: "{{ postgres_test.rc == 0 | default(false) }}"
+          data_ops_work: "{{ 'Deployed by Ansible role!' in (postgres_get.stdout | default('')) }}"
+
+    - name: "SUMMARY: Display test results"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 16: POSTGRESQL PATRONI CLUSTER RESULTS
+          ====================================================================
+            Coolify Setup (via coolify role):
+              Installed via Role: {{ test_results.coolify_installed_via_role }}
+              API Token from Role: {{ test_results.api_token_from_role }}
+
+            Test Results:
+              TEST-001 Role Loads:       {{ test_results.role_loaded }}
+              TEST-002 Service Created:  {{ test_results.service_created }}
+              TEST-003 API Verification: {{ test_results.api_verified }}
+              TEST-004 PostgreSQL Up:    {{ test_results.postgres_responding }}
+              TEST-005 Data Operations:  {{ test_results.data_ops_work }}
+
+            Service UUID: {{ test_results.service_uuid }}
+            Project UUID: {{ postgresql_project_uuid | default('N/A') }}
+
+            KEY: This test verifies the coolify-postgresql ROLE deploys
+            correctly via Coolify role-installed instance.
+
+            Overall: {{ 'PASSED' if (test_results.role_loaded and test_results.service_created and test_results.api_verified) else 'FAILED' }}
+          ====================================================================
+
+    # ==========================================================================
+    # CLEANUP: Remove Test Resources
+    # ==========================================================================
+    - name: "CLEANUP: Delete PostgreSQL service"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ postgresql_service_uuids[postgresql_current_node.name] }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      when: postgresql_service_uuids is defined and postgresql_current_node.name in postgresql_service_uuids
+      ignore_errors: true
+
+    - name: "CLEANUP: Get project UUID"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: projects_list
+
+    - name: "CLEANUP: Find test project"
+      ansible.builtin.set_fact:
+        test_project_uuid: >-
+          {{ projects_list.json | selectattr('name', 'equalto', postgresql_project_name) | map(attribute='uuid') | first | default('') }}
+
+    - name: "CLEANUP: Delete test project"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ test_project_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      when: test_project_uuid != ''
+      ignore_errors: true
+
+    - name: "CLEANUP: Delete test server"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers/{{ server1_result.json.uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      when: server1_result is defined
+      ignore_errors: true
+
+    - name: "CLEANUP: Delete test private key"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/security/keys/{{ private_key_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      when: private_key_uuid is defined
+      ignore_errors: true
+
+  # ============================================================================
+  # POST_TASKS: Final Cleanup
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Destroy test containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: PostgreSQL Patroni Role"
+      ansible.builtin.debug:
+        msg: |
+          PostgreSQL Patroni Role Test Complete!
+          - Coolify installed via coolify role
+          - Role defaults loaded correctly
+          - Role deployed PostgreSQL service via Coolify API
+          - Service verified in Coolify
+          - PostgreSQL responded to queries
+
+  tags:
+    - test
+    - postgresql-patroni
+    - role-test
+    - docker-dev

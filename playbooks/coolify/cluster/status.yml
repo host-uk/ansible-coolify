@@ -1,0 +1,175 @@
+---
+# Check Status of All Shared Infrastructure Clusters
+#
+# This playbook checks the health of all deployed clusters:
+# - MariaDB Galera Cluster
+# - Redis Sentinel Cluster
+# - PostgreSQL Patroni Cluster
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/cluster/status.yml
+
+- name: Check Shared Infrastructure Cluster Status
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display status check start
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SHARED INFRASTRUCTURE STATUS CHECK
+          ====================================================================
+            Checking health of all deployed clusters...
+          ====================================================================
+
+  tasks:
+    # ==========================================================================
+    # Setup Coolify API Access
+    # ==========================================================================
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    # ==========================================================================
+    # Check Galera Cluster
+    # ==========================================================================
+    - name: "GALERA: Check MariaDB Galera Cluster"
+      block:
+        - name: Include Galera role defaults
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: main.yml
+
+        - name: Check Galera health
+          ansible.builtin.include_role:
+            name: coolify-galera
+            tasks_from: health_check.yml
+          vars:
+            galera_health_check_strict: false
+
+        - name: Store Galera status
+          ansible.builtin.set_fact:
+            cluster_galera_status: "{{ galera_cluster_healthy | default(false) }}"
+            cluster_galera_nodes: "{{ galera_running_count | default(0) }}/{{ galera_nodes | length }}"
+      rescue:
+        - name: Mark Galera as unavailable
+          ansible.builtin.set_fact:
+            cluster_galera_status: false
+            cluster_galera_nodes: "0/{{ galera_nodes | default([]) | length }}"
+
+    # ==========================================================================
+    # Check Redis Sentinel Cluster
+    # ==========================================================================
+    - name: "REDIS: Check Redis Sentinel Cluster"
+      block:
+        - name: Include Redis Sentinel role defaults
+          ansible.builtin.include_role:
+            name: coolify-redis-sentinel
+            tasks_from: main.yml
+
+        - name: Check Redis Sentinel health
+          ansible.builtin.include_role:
+            name: coolify-redis-sentinel
+            tasks_from: health_check.yml
+          vars:
+            redis_health_fail_on_error: false
+
+        - name: Store Redis status
+          ansible.builtin.set_fact:
+            cluster_redis_status: "{{ redis_health_summary.master_healthy | default(false) and redis_health_summary.sentinel_reachable | default(false) }}"
+            cluster_redis_replicas: "{{ redis_health_summary.connected_replicas | default(0) }}/{{ redis_health_summary.expected_replicas | default(0) }}"
+      rescue:
+        - name: Mark Redis as unavailable
+          ansible.builtin.set_fact:
+            cluster_redis_status: false
+            cluster_redis_replicas: "0/{{ redis_nodes | default([]) | length }}"
+
+    # ==========================================================================
+    # Check PostgreSQL Patroni Cluster
+    # ==========================================================================
+    - name: "POSTGRESQL: Check PostgreSQL Patroni Cluster"
+      block:
+        - name: Include PostgreSQL Patroni role defaults
+          ansible.builtin.include_role:
+            name: coolify-postgresql
+            tasks_from: main.yml
+
+        - name: Check PostgreSQL Patroni health
+          ansible.builtin.include_role:
+            name: coolify-postgresql
+            tasks_from: health_check.yml
+          vars:
+            postgresql_health_fail_on_error: false
+
+        - name: Store PostgreSQL status
+          ansible.builtin.set_fact:
+            cluster_postgresql_status: "{{ postgresql_health_summary.patroni_reachable | default(false) and postgresql_health_summary.primary_healthy | default(false) }}"
+            cluster_postgresql_members: "{{ postgresql_health_summary.patroni_members | default(0) }}/{{ postgresql_health_summary.total_nodes | default(0) }}"
+            cluster_postgresql_leader: "{{ postgresql_health_summary.leader_node | default('unknown') }}"
+      rescue:
+        - name: Mark PostgreSQL as unavailable
+          ansible.builtin.set_fact:
+            cluster_postgresql_status: false
+            cluster_postgresql_members: "0/{{ postgresql_nodes | default([]) | length }}"
+            cluster_postgresql_leader: "unknown"
+
+    # ==========================================================================
+    # Get Coolify Services Summary
+    # ==========================================================================
+    - name: Get all services from Coolify
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: all_services
+
+    - name: Count cluster services
+      ansible.builtin.set_fact:
+        cluster_galera_services: "{{ all_services.json | selectattr('name', 'search', 'galera') | list | length }}"
+        cluster_redis_services: "{{ all_services.json | selectattr('name', 'search', 'redis') | list | length }}"
+        cluster_postgresql_services: "{{ all_services.json | selectattr('name', 'search', 'postgres') | list | length }}"
+        cluster_total_services: "{{ all_services.json | length }}"
+
+  # ============================================================================
+  # Post Tasks: Display Summary
+  # ============================================================================
+  post_tasks:
+    - name: Build overall status
+      ansible.builtin.set_fact:
+        cluster_overall_healthy: "{{ cluster_galera_status and cluster_redis_status and cluster_postgresql_status }}"
+
+    - name: Display cluster status summary
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    SHARED INFRASTRUCTURE STATUS SUMMARY
+          ====================================================================
+
+            MariaDB Galera Cluster:
+              Status: {{ 'HEALTHY' if cluster_galera_status else 'DEGRADED/OFFLINE' }}
+              Nodes: {{ cluster_galera_nodes }}
+              Hostname: {{ galera_hostname | default('db.host.uk.com') }}
+              Services in Coolify: {{ cluster_galera_services }}
+
+            Redis Sentinel Cluster:
+              Status: {{ 'HEALTHY' if cluster_redis_status else 'DEGRADED/OFFLINE' }}
+              Replicas: {{ cluster_redis_replicas }}
+              Hostname: {{ redis_hostname | default('cache.host.uk.com') }}
+              Services in Coolify: {{ cluster_redis_services }}
+
+            PostgreSQL Patroni Cluster:
+              Status: {{ 'HEALTHY' if cluster_postgresql_status else 'DEGRADED/OFFLINE' }}
+              Members: {{ cluster_postgresql_members }}
+              Leader: {{ cluster_postgresql_leader }}
+              Hostname: {{ postgresql_hostname | default('db.postgres.host.uk.com') }}
+              Services in Coolify: {{ cluster_postgresql_services }}
+
+            ------------------------------------------------------------------
+            Overall Status: {{ 'ALL HEALTHY' if cluster_overall_healthy else 'ATTENTION REQUIRED' }}
+            Total Coolify Services: {{ cluster_total_services }}
+          ====================================================================

@@ -1,0 +1,107 @@
+---
+# Generate Failure Report
+# Included by test_service.yml on failed test
+#
+# Expects variables:
+#   service_name: Service type name
+#   test_service_uuid: UUID of the deployed service (may be empty)
+#   test_error: Error message
+#   test_logs: Container logs (if available)
+#   coolify_api_url: API URL
+#   coolify_api_token: API token
+#   docs_path: Base path for failure docs
+
+- name: "REPORT: Get service details if available"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: [200, 404]
+  register: report_service_details
+  when: test_service_uuid != ""
+  ignore_errors: true
+
+- name: "REPORT: Get Coolify version"
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/version"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: coolify_version
+  ignore_errors: true
+
+- name: "REPORT: Create failure report"
+  ansible.builtin.copy:
+    content: |
+      # {{ service_name }} - Test Failed
+
+      ## Status: FAILED
+      ## Tested: {{ lookup('pipe', 'date -Iseconds') }}
+      ## Coolify Version: {{ coolify_version.json.version | default('Unknown') }}
+
+      ## Error Summary
+
+      {{ test_error }}
+
+      ## Container Logs
+
+      ```
+      {{ test_logs | default('No logs available') }}
+      ```
+
+      ## Configuration Attempted
+
+      ```yaml
+      service_type: {{ service_name }}
+      project: {{ test_project_name | default('Unknown') }}
+      environment: {{ test_env_name | default('Unknown') }}
+      server_uuid: {{ test_server_uuid | default('Unknown') }}
+      service_uuid: {{ test_service_uuid | default('Not created') }}
+      ```
+
+      {% if report_service_details is defined and report_service_details.status is defined and report_service_details.status == 200 %}
+      ## Service Details from API
+
+      ```yaml
+      status: {{ report_service_details.json.status | default('Unknown') }}
+      fqdn: {{ report_service_details.json.fqdn | default('Not set') }}
+      docker_compose_raw: |
+      {{ report_service_details.json.docker_compose_raw | default('Not available') | indent(4) }}
+      ```
+      {% endif %}
+
+      ## Environment Variables
+
+      ```yaml
+      # Default environment variables used
+      # (Service-specific overrides may be needed)
+      ```
+
+      ## Possible Fixes
+
+      - [ ] Check if service requires specific environment variables
+      - [ ] Verify server has sufficient resources (CPU, memory, disk)
+      - [ ] Check if service has special port requirements
+      - [ ] Review container logs for specific errors
+      - [ ] Check if service requires external dependencies (database, redis, etc.)
+
+      ## Next Steps
+
+      1. Review the error and logs above
+      2. Check Coolify documentation for {{ service_name }}
+      3. Try deploying manually in Coolify UI to see detailed errors
+      4. Update `database_mappings.yml` if service has database requirements
+      5. Re-run test after fixes:
+         ```bash
+         make dev-test-service SERVICE={{ service_name }}
+         ```
+    dest: "{{ docs_path }}/{{ service_name }}.md"
+    mode: '0644'
+
+- name: "REPORT: Display failure"
+  ansible.builtin.debug:
+    msg: |
+      Failure report created: docs/plan/service/{{ service_name }}.md
+        Error: {{ test_error }}

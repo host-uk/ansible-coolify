@@ -1,0 +1,172 @@
+---
+# Deploy a one-click app via Coolify Services API
+#
+# Required variables:
+#   oneclick_service_type: Service type to deploy
+#   oneclick_app_name: App name
+#   coolify_api_token: Coolify API token
+#   coolify_api_url: Coolify API base URL
+#   oneclick_server_uuid: Target server UUID
+
+- name: Load database mappings
+  ansible.builtin.include_vars:
+    file: database_mappings.yml
+
+- name: Detect database requirements
+  ansible.builtin.include_tasks: detect_database.yml
+
+- name: Configure PostgreSQL database
+  ansible.builtin.include_tasks: configure_postgresql.yml
+  when:
+    - oneclick_requires_postgresql
+    - oneclick_auto_create_database
+
+- name: Configure MariaDB database
+  ansible.builtin.include_tasks: configure_mariadb.yml
+  when:
+    - oneclick_requires_mariadb
+    - oneclick_auto_create_database
+
+- name: Configure Redis connection
+  ansible.builtin.include_tasks: configure_redis.yml
+  when:
+    - oneclick_requires_redis
+    - oneclick_auto_configure_redis
+
+- name: Build combined environment variables
+  ansible.builtin.set_fact:
+    oneclick_all_env_vars: >-
+      {{
+        (oneclick_postgresql_env_vars | default({}))
+        | combine(oneclick_mariadb_env_vars | default({}))
+        | combine(oneclick_redis_env_vars | default({}))
+        | combine(oneclick_extra_env_vars | default({}))
+      }}
+
+- name: Get existing projects
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/projects"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: oneclick_projects_list
+
+- name: Find or create project
+  ansible.builtin.set_fact:
+    oneclick_project_uuid: >-
+      {{
+        oneclick_projects_list.json
+        | selectattr('name', 'equalto', oneclick_project_name)
+        | map(attribute='uuid')
+        | first
+        | default('')
+      }}
+
+- name: Create project if not exists
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/projects"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ oneclick_project_name }}"
+      description: "One-Click Applications"
+    status_code: [200, 201]
+  register: oneclick_project_create
+  when: oneclick_project_uuid == ''
+
+- name: Set project UUID from creation
+  ansible.builtin.set_fact:
+    oneclick_project_uuid: "{{ oneclick_project_create.json.uuid }}"
+  when: oneclick_project_uuid == ''
+
+- name: Check if service already exists
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+    status_code: 200
+  register: oneclick_existing_services
+
+- name: Find existing service
+  ansible.builtin.set_fact:
+    oneclick_existing_service: >-
+      {{
+        oneclick_existing_services.json
+        | selectattr('name', 'equalto', oneclick_app_name)
+        | first
+        | default({})
+      }}
+
+- name: Deploy one-click service
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      name: "{{ oneclick_app_name }}"
+      description: "{{ oneclick_app_description | default(oneclick_service_type ~ ' deployed via Ansible') }}"
+      project_uuid: "{{ oneclick_project_uuid }}"
+      server_uuid: "{{ oneclick_server_uuid }}"
+      environment_name: "{{ oneclick_environment_name }}"
+      type: "{{ oneclick_service_type }}"
+      instant_deploy: "{{ oneclick_instant_deploy }}"
+    status_code: [200, 201]
+  register: oneclick_service_create
+  when: oneclick_existing_service == {}
+
+- name: Store service UUID
+  ansible.builtin.set_fact:
+    oneclick_service_uuid: "{{ oneclick_service_create.json.uuid | default(oneclick_existing_service.uuid | default('')) }}"
+
+- name: Wait for service to be created
+  ansible.builtin.pause:
+    seconds: 5
+    prompt: "Waiting for service to initialize..."
+  when: oneclick_existing_service == {}
+
+- name: Update service environment variables
+  ansible.builtin.uri:
+    url: "{{ coolify_api_url }}/services/{{ oneclick_service_uuid }}/envs"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ coolify_api_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      key: "{{ item.key }}"
+      value: "{{ item.value }}"
+    status_code: [200, 201, 404]
+  loop: "{{ oneclick_all_env_vars | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - oneclick_service_uuid | length > 0
+    - oneclick_all_env_vars | length > 0
+  ignore_errors: true
+  no_log: true
+
+- name: Display deployment result
+  ansible.builtin.debug:
+    msg: |
+      One-Click App Deployment Complete:
+        Service: {{ oneclick_service_type }}
+        Name: {{ oneclick_app_name }}
+        UUID: {{ oneclick_service_uuid }}
+        Project: {{ oneclick_project_name }}
+        Status: {{ 'CREATED' if oneclick_existing_service == {} else 'ALREADY EXISTS' }}
+
+        Database Configuration:
+          Type: {{ oneclick_database_type }}
+          Database: {{ oneclick_db_name | default('N/A') }}
+          User: {{ oneclick_db_user | default('N/A') }}
+
+        Redis: {{ 'Configured' if oneclick_requires_redis else 'Not required' }}
+        Environment Variables: {{ oneclick_all_env_vars | length }} configured

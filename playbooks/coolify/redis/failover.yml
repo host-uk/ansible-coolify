@@ -1,0 +1,56 @@
+---
+# Trigger Manual Redis Sentinel Failover
+#
+# This playbook triggers a manual failover in the Redis Sentinel cluster,
+# promoting a replica to become the new master.
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/redis/failover.yml
+
+- name: Trigger Redis Sentinel Failover
+  hosts: controller
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Display failover warning
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                       REDIS SENTINEL MANUAL FAILOVER
+          ====================================================================
+            WARNING: This will trigger a failover to a new master!
+
+            The current master will be demoted to replica and a replica
+            will be promoted to master.
+
+            This should be used for:
+              - Planned maintenance
+              - Testing failover procedures
+              - Replacing a problematic master
+
+            The cluster will remain available during failover.
+          ====================================================================
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Redis Sentinel role defaults
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: main.yml
+
+    - name: Execute failover
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: failover.yml
+
+    - name: Verify cluster health after failover
+      ansible.builtin.include_role:
+        name: coolify-redis-sentinel
+        tasks_from: health_check.yml
+      vars:
+        redis_health_fail_on_error: false

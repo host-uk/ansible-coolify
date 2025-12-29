@@ -161,8 +161,17 @@ help:
 	@echo "  clone-env          - Clone environment (requires SOURCE and TARGET)"
 	@echo "  empty-env          - Empty an environment (delete all resources)"
 	@echo ""
+	@echo "Available targets (Service Testing):"
+	@echo "  dev-test-service   - Test a single service (SERVICE=name)"
+	@echo "  dev-test-standalone - Test all standalone services"
+	@echo "  dev-test-mariadb   - Test all MariaDB-based services"
+	@echo "  dev-test-postgresql - Test all PostgreSQL-based services"
+	@echo "  dev-test-all-services - Test all 100+ services"
+	@echo "  dev-service-report - View service compatibility report"
+	@echo ""
 	@echo "Examples:"
 	@echo "  make dev-deploy EXTRA_VARS=\"-e coolify_root_username=admin ...\""
+	@echo "  make dev-test-service SERVICE=uptime-kuma"
 
 # --- Native Targets ---
 
@@ -323,6 +332,303 @@ docker-dev-test-integration:
 docker-dev-cleanup:
 	bash tests/docker-dev/scripts/cleanup.sh
 
+# --- Galera Cluster Targets ---
+
+dev-galera-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/deploy.yml LIMIT=development
+
+dev-galera-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/status.yml LIMIT=development
+
+dev-galera-status-wsrep:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/status.yml LIMIT=development VARS="-e check_wsrep=true"
+
+dev-galera-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/backup.yml LIMIT=development
+
+dev-galera-restore:
+	@if [ -z "$(BACKUP)" ]; then \
+		echo "Error: BACKUP is required."; \
+		echo "Usage: make dev-galera-restore BACKUP=<backup_filename>"; \
+		echo "Available backups:"; \
+		ls -la state/galera/backups/*.sql.gz 2>/dev/null || echo "  (none found)"; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/restore.yml LIMIT=development \
+		VARS="-e backup_file=$(BACKUP) -e confirm_restore=true"
+
+dev-galera-recover:
+	@if [ -z "$(NODE)" ]; then \
+		echo "Error: NODE is required."; \
+		echo "Usage: make dev-galera-recover NODE=<hostname>"; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/recover.yml LIMIT=development \
+		VARS="-e recover_node=$(NODE)"
+
+dev-galera-test:
+	@echo "Running Galera cluster tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_08_galera_cluster.yml
+	$(MAKE) _run-pb PB=tests/docker-dev/test_09_galera_failover.yml
+	$(MAKE) _run-pb PB=tests/docker-dev/test_10_galera_backup.yml
+	$(MAKE) _run-pb PB=tests/docker-dev/test_11_galera_laravel.yml
+
+prod-galera-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/deploy.yml LIMIT=production
+
+prod-galera-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/status.yml LIMIT=production
+
+prod-galera-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/backup.yml LIMIT=production
+
+prod-galera-restore:
+	@if [ -z "$(BACKUP)" ]; then \
+		echo "Error: BACKUP is required."; \
+		echo "Usage: make prod-galera-restore BACKUP=<backup_filename>"; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/restore.yml LIMIT=production \
+		VARS="-e backup_file=$(BACKUP) -e confirm_restore=true"
+
+prod-galera-recover:
+	@if [ -z "$(NODE)" ]; then \
+		echo "Error: NODE is required."; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/galera/recover.yml LIMIT=production \
+		VARS="-e recover_node=$(NODE)"
+
+# --- Redis Sentinel Cluster Targets ---
+
+dev-redis-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/deploy.yml LIMIT=development
+
+dev-redis-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/status.yml LIMIT=development
+
+dev-redis-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/backup.yml LIMIT=development
+
+dev-redis-failover:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/failover.yml LIMIT=development
+
+dev-redis-test:
+	@echo "Running Redis Sentinel cluster tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_15_redis_sentinel.yml
+
+prod-redis-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/deploy.yml LIMIT=production
+
+prod-redis-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/status.yml LIMIT=production
+
+prod-redis-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/backup.yml LIMIT=production
+
+prod-redis-failover:
+	$(MAKE) _run-pb PB=playbooks/coolify/redis/failover.yml LIMIT=production
+
+# --- PostgreSQL Patroni Cluster Targets ---
+
+dev-postgresql-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/deploy.yml LIMIT=development
+
+dev-postgresql-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/status.yml LIMIT=development
+
+dev-postgresql-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/backup.yml LIMIT=development
+
+dev-postgresql-switchover:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/switchover.yml LIMIT=development
+
+dev-postgresql-test:
+	@echo "Running PostgreSQL Patroni cluster tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_16_postgresql_patroni.yml
+
+prod-postgresql-deploy:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/deploy.yml LIMIT=production
+
+prod-postgresql-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/status.yml LIMIT=production
+
+prod-postgresql-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/backup.yml LIMIT=production
+
+prod-postgresql-switchover:
+	$(MAKE) _run-pb PB=playbooks/coolify/postgresql/switchover.yml LIMIT=production
+
+# --- Cluster Orchestration Targets ---
+
+dev-cluster-deploy:
+	@echo "Deploying complete shared infrastructure cluster..."
+	$(MAKE) _run-pb PB=playbooks/coolify/cluster/deploy.yml LIMIT=development
+
+dev-cluster-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/cluster/status.yml LIMIT=development
+
+dev-cluster-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/cluster/backup.yml LIMIT=development
+
+dev-cluster-test:
+	@echo "Running full cluster integration tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_18_full_cluster.yml
+
+prod-cluster-deploy:
+	@echo "Deploying complete shared infrastructure cluster..."
+	$(MAKE) _run-pb PB=playbooks/coolify/cluster/deploy.yml LIMIT=production
+
+prod-cluster-status:
+	$(MAKE) _run-pb PB=playbooks/coolify/cluster/status.yml LIMIT=production
+
+prod-cluster-backup:
+	$(MAKE) _run-pb PB=playbooks/coolify/cluster/backup.yml LIMIT=production
+
+# --- One-Click App Targets ---
+
+dev-oneclick-deploy:
+	@if [ -z "$(APP)" ] || [ -z "$(NAME)" ]; then \
+		echo "Error: APP and NAME are required."; \
+		echo "Usage: make dev-oneclick-deploy APP=<service_type> NAME=<app_name>"; \
+		echo "Examples:"; \
+		echo "  make dev-oneclick-deploy APP=chatwoot NAME=my-chatwoot"; \
+		echo "  make dev-oneclick-deploy APP=n8n NAME=automation"; \
+		echo "  make dev-oneclick-deploy APP=uptime-kuma NAME=monitoring"; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/oneclick/deploy.yml LIMIT=development \
+		VARS="-e oneclick_service_type=$(APP) -e oneclick_app_name=$(NAME)"
+
+dev-oneclick-list:
+	$(MAKE) _run-pb PB=playbooks/coolify/oneclick/list.yml
+
+dev-oneclick-detect:
+	@if [ -z "$(APP)" ]; then \
+		echo "Error: APP is required."; \
+		echo "Usage: make dev-oneclick-detect APP=<service_type>"; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/oneclick/detect.yml \
+		VARS="-e oneclick_service_type=$(APP)"
+
+dev-oneclick-test:
+	@echo "Running One-Click App tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_17_oneclick_app.yml
+
+prod-oneclick-deploy:
+	@if [ -z "$(APP)" ] || [ -z "$(NAME)" ]; then \
+		echo "Error: APP and NAME are required."; \
+		echo "Usage: make prod-oneclick-deploy APP=<service_type> NAME=<app_name>"; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/oneclick/deploy.yml LIMIT=production \
+		VARS="-e oneclick_service_type=$(APP) -e oneclick_app_name=$(NAME)"
+
+prod-oneclick-list:
+	$(MAKE) _run-pb PB=playbooks/coolify/oneclick/list.yml
+
+prod-oneclick-detect:
+	@if [ -z "$(APP)" ]; then \
+		echo "Error: APP is required."; \
+		exit 1; \
+	fi
+	$(MAKE) _run-pb PB=playbooks/coolify/oneclick/detect.yml \
+		VARS="-e oneclick_service_type=$(APP)"
+
+# --- Service Testing Targets ---
+# These targets use tests/docker-dev/.env.test.local for API credentials
+# Create from template: cp tests/docker-dev/.env.test tests/docker-dev/.env.test.local
+
+# Helper to source env file if it exists
+SERVICE_TEST_ENV := tests/docker-dev/.env.test.local
+define source_test_env
+	$(if $(wildcard $(SERVICE_TEST_ENV)),. $(SERVICE_TEST_ENV) &&,)
+endef
+
+dev-test-service:
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "Error: SERVICE is required."; \
+		echo "Usage: make dev-test-service SERVICE=<service_type>"; \
+		echo "Example: make dev-test-service SERVICE=uptime-kuma"; \
+		exit 1; \
+	fi
+	@if [ ! -f $(SERVICE_TEST_ENV) ]; then \
+		echo "Warning: $(SERVICE_TEST_ENV) not found."; \
+		echo "Create it: cp tests/docker-dev/.env.test $(SERVICE_TEST_ENV)"; \
+		echo "Then set COOLIFY_API_TOKEN in the file."; \
+	fi
+	@$(source_test_env) $(MAKE) _run-pb PB=playbooks/coolify/service-test/test_service.yml \
+		VARS="-e service_name=$(SERVICE)"
+
+dev-test-standalone:
+	@echo "Testing standalone services (no database dependencies)..."
+	@$(source_test_env) $(MAKE) _run-pb PB=playbooks/coolify/service-test/test_all.yml \
+		VARS="-e category=standalone"
+
+dev-test-mariadb:
+	@echo "Testing MariaDB-based services..."
+	@$(source_test_env) $(MAKE) _run-pb PB=playbooks/coolify/service-test/test_all.yml \
+		VARS="-e category=mariadb"
+
+dev-test-postgresql:
+	@echo "Testing PostgreSQL-based services..."
+	@$(source_test_env) $(MAKE) _run-pb PB=playbooks/coolify/service-test/test_all.yml \
+		VARS="-e category=postgresql"
+
+dev-test-all-services:
+	@echo "Testing all Coolify services..."
+	@$(source_test_env) $(MAKE) _run-pb PB=playbooks/coolify/service-test/test_all.yml \
+		VARS="-e category=all"
+
+dev-service-report:
+	@echo "Service compatibility report: docs/service_compatibility.md"
+	@if [ -f docs/service_compatibility.md ]; then \
+		cat docs/service_compatibility.md; \
+	else \
+		echo "No report found. Run 'make dev-test-all-services' first."; \
+	fi
+
+# --- API Verification Test Targets ---
+
+native-test-api-verify:
+	@echo "Running API verification tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_12_api_verification.yml
+
+native-test-service-verify:
+	@echo "Running service verification tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_13_service_verification.yml
+
+native-test-chatwoot-galera:
+	@echo "Running Chatwoot + Galera integration test..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_14_chatwoot_galera.yml
+
+native-test-redis-sentinel:
+	@echo "Running Redis Sentinel cluster test..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_15_redis_sentinel.yml
+
+native-test-postgresql-patroni:
+	@echo "Running PostgreSQL Patroni cluster test..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_16_postgresql_patroni.yml
+
+native-test-oneclick-app:
+	@echo "Running One-Click App tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_17_oneclick_app.yml
+
+native-test-full-cluster:
+	@echo "Running Full Cluster Integration tests..."
+	$(MAKE) _run-pb PB=tests/docker-dev/test_18_full_cluster.yml
+
+native-test-verify-all:
+	@echo "Running all verification tests..."
+	$(MAKE) native-test-api-verify
+	$(MAKE) native-test-service-verify
+	$(MAKE) native-test-chatwoot-galera
+	$(MAKE) native-test-redis-sentinel
+	$(MAKE) native-test-postgresql-patroni
+	$(MAKE) native-test-oneclick-app
+	$(MAKE) native-test-full-cluster
+
 # --- Production Targets ---
 
 prod-backup:
@@ -434,6 +740,7 @@ _run-docker:
 	dev-create-app dev-create-db dev-create-service dev-deploy dev-docker-deploy dev-empty-env dev-empty-env-pb \
 	dev-hetzner-setup dev-login dev-reinstall dev-restore dev-restore-app dev-restore-db dev-restore-service \
 	dev-sync-apps dev-test-install-config dev-uninstall dev-uninstall-app dev-uninstall-db dev-uninstall-service \
+	dev-galera-deploy dev-galera-status dev-galera-status-wsrep dev-galera-backup dev-galera-restore dev-galera-recover dev-galera-test \
 	help \
 	up down shell \
 	docker-dev-up docker-dev-down docker-dev-destroy docker-dev-logs docker-dev-logs-controller docker-dev-logs-builder \
@@ -443,8 +750,19 @@ _run-docker:
 	docker-dev-test-api-setup docker-dev-test-node-registration docker-dev-test-integration docker-dev-cleanup \
 	native-build-ansible native-clean native-docker-lint native-docker-test native-install-deps native-lint \
 	native-setup native-start-agent native-test native-test-docker native-test-logic native-test-parallels native-test-syntax native-update-deps \
+	native-test-api-verify native-test-service-verify native-test-chatwoot-galera native-test-redis-sentinel native-test-postgresql-patroni native-test-oneclick-app native-test-full-cluster native-test-verify-all \
 	prod-backup prod-clear-host-uk-lon prod-clone-app-de-eu prod-clone-env prod-clone-env-pb prod-clone-host-uk-lon \
 	prod-create-app prod-create-db prod-create-service prod-deploy prod-docker-deploy prod-empty-env prod-empty-env-pb \
 	prod-hetzner-setup prod-login prod-reinstall prod-restore prod-restore-app prod-restore-db prod-restore-service \
 	prod-sync-apps prod-uninstall prod-uninstall-app prod-uninstall-db prod-uninstall-service \
+	prod-galera-deploy prod-galera-status prod-galera-backup prod-galera-restore prod-galera-recover \
+	dev-redis-deploy dev-redis-status dev-redis-backup dev-redis-failover dev-redis-test \
+	prod-redis-deploy prod-redis-status prod-redis-backup prod-redis-failover \
+	dev-postgresql-deploy dev-postgresql-status dev-postgresql-backup dev-postgresql-switchover dev-postgresql-test \
+	prod-postgresql-deploy prod-postgresql-status prod-postgresql-backup prod-postgresql-switchover \
+	dev-oneclick-deploy dev-oneclick-list dev-oneclick-detect dev-oneclick-test \
+	prod-oneclick-deploy prod-oneclick-list prod-oneclick-detect \
+	dev-cluster-deploy dev-cluster-status dev-cluster-backup dev-cluster-test \
+	prod-cluster-deploy prod-cluster-status prod-cluster-backup \
+	dev-test-service dev-test-standalone dev-test-mariadb dev-test-postgresql dev-test-all-services dev-service-report \
 	_run-pb _run-docker

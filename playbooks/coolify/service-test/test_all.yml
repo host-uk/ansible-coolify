@@ -1,0 +1,180 @@
+---
+# Test All Coolify Services
+#
+# Orchestrates testing of all Coolify one-click services.
+# Tests standalone services first, then database-dependent services.
+#
+# Usage:
+#   # Test all services
+#   ansible-playbook playbooks/coolify/service-test/test_all.yml
+#
+#   # Test only standalone services
+#   ansible-playbook playbooks/coolify/service-test/test_all.yml -e category=standalone
+#
+#   # Test only mariadb services
+#   ansible-playbook playbooks/coolify/service-test/test_all.yml -e category=mariadb
+#
+#   # Test only postgresql services
+#   ansible-playbook playbooks/coolify/service-test/test_all.yml -e category=postgresql
+#
+#   # Limit number of services (for testing)
+#   ansible-playbook playbooks/coolify/service-test/test_all.yml -e limit=5
+#
+# Optional Variables:
+#   category: standalone, mariadb, postgresql, or all (default: all)
+#   limit: Max number of services to test (default: 0 = no limit)
+#   parallel: Number of parallel tests (default: 1)
+#   skip_existing: Skip services with existing templates (default: false)
+
+- name: "Test All Coolify Services"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    # Test configuration
+    category: "all"
+    limit: 0
+    parallel: 1
+    skip_existing: false
+
+    # API configuration
+    coolify_api_url: "{{ lookup('env', 'COOLIFY_API_URL') | default('http://172.28.0.10:8000/api/v1', true) }}"
+    coolify_api_token: "{{ lookup('env', 'COOLIFY_API_TOKEN') | default('', true) }}"
+
+    # Paths
+    templates_path: "{{ playbook_dir }}/../../../templates"
+    docs_path: "{{ playbook_dir }}/../../../docs/plan/service"
+    mappings_path: "{{ playbook_dir }}/../../roles/coolify-oneclick-app/vars/database_mappings.yml"
+
+    # Results tracking
+    test_results: []
+    passed_services: []
+    failed_services: []
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: Load Service Catalog
+    # =========================================================================
+    - name: "Load database mappings"
+      ansible.builtin.include_vars:
+        file: "{{ mappings_path }}"
+        name: db_mappings
+
+    - name: "Build service lists by category"
+      ansible.builtin.set_fact:
+        standalone_services: "{{ db_mappings.standalone_services | default([]) }}"
+        mariadb_services: "{{ db_mappings.mariadb_services | default([]) }}"
+        postgresql_services: "{{ db_mappings.postgresql_services | default([]) }}"
+
+    - name: "Select services based on category"
+      ansible.builtin.set_fact:
+        services_to_test: >-
+          {%- if category == 'standalone' -%}
+            {{ standalone_services }}
+          {%- elif category == 'mariadb' -%}
+            {{ mariadb_services }}
+          {%- elif category == 'postgresql' -%}
+            {{ postgresql_services }}
+          {%- else -%}
+            {{ standalone_services + mariadb_services + postgresql_services }}
+          {%- endif -%}
+
+    - name: "Apply limit if specified"
+      ansible.builtin.set_fact:
+        services_to_test: "{{ services_to_test[:limit | int] }}"
+      when: limit | int > 0
+
+    - name: "Check for existing templates"
+      ansible.builtin.stat:
+        path: "{{ templates_path }}/{{ item }}/template.yml"
+      loop: "{{ services_to_test }}"
+      register: existing_templates
+      when: skip_existing
+
+    - name: "Filter out existing templates"
+      ansible.builtin.set_fact:
+        services_to_test: >-
+          {{
+            services_to_test | zip(existing_templates.results | default([]))
+            | rejectattr('1.stat.exists', 'equalto', true)
+            | map(attribute='0')
+            | list
+          }}
+      when: skip_existing
+
+    - name: "Display test plan"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                      COOLIFY SERVICE TEST PLAN
+          ====================================================================
+            Category: {{ category }}
+            Total Services: {{ services_to_test | length }}
+            Parallel: {{ parallel }}
+            Skip Existing: {{ skip_existing }}
+
+            Services to test:
+          {% for svc in services_to_test %}
+              - {{ svc }}
+          {% endfor %}
+          ====================================================================
+
+    # =========================================================================
+    # PHASE 2: Validate Prerequisites
+    # =========================================================================
+    - name: "Validate API token"
+      ansible.builtin.fail:
+        msg: "API token not configured. Set COOLIFY_API_TOKEN environment variable."
+      when: coolify_api_token == ""
+
+    - name: "Verify API access"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+
+    - name: "Display Coolify version"
+      ansible.builtin.debug:
+        msg: "Testing against Coolify {{ api_check.json.version | default('unknown') }}"
+
+    # =========================================================================
+    # PHASE 3: Run Tests
+    # =========================================================================
+    - name: "Test each service"
+      ansible.builtin.include_tasks: test_single_service.yml
+      loop: "{{ services_to_test }}"
+      loop_control:
+        loop_var: current_service
+        label: "{{ current_service }}"
+
+    # =========================================================================
+    # PHASE 4: Generate Summary
+    # =========================================================================
+    - name: "Generate compatibility report"
+      ansible.builtin.include_tasks: generate_summary.yml
+
+    - name: "Display final summary"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                      COOLIFY SERVICE TEST RESULTS
+          ====================================================================
+            Total Tested: {{ test_results | length }}
+            Passed: {{ passed_services | length }}
+            Failed: {{ failed_services | length }}
+
+            Passed Services:
+          {% for svc in passed_services %}
+              - {{ svc }} -> templates/{{ svc }}/
+          {% endfor %}
+
+            Failed Services:
+          {% for svc in failed_services %}
+              - {{ svc }} -> docs/plan/service/{{ svc }}.md
+          {% endfor %}
+
+            Summary Report: docs/service_compatibility.md
+          ====================================================================

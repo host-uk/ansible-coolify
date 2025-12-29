@@ -1,0 +1,97 @@
+---
+# Check Galera Cluster Status
+#
+# Usage:
+#   ansible-playbook -i inventory/ playbooks/coolify/galera/status.yml
+#
+# Options:
+#   -e check_wsrep=true    Also check wsrep status inside containers
+#   -e check_grastate=true Check grastate.dat for recovery info
+
+- name: Check Galera Cluster Status
+  hosts: controller
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Setup Coolify API access
+      ansible.builtin.include_role:
+        name: coolify
+        tasks_from: api_setup.yml
+
+    - name: Include Galera role defaults
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: main.yml
+
+    - name: Check cluster health
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: health_check.yml
+      vars:
+        galera_health_check_strict: false
+
+    - name: Check wsrep status (optional)
+      when: check_wsrep | default(false) | bool
+      block:
+        - name: Get wsrep status from each node
+          ansible.builtin.shell: |
+            docker exec galera-{{ item.name }} \
+              mariadb -u root -p{{ galera_root_password }} -N -e \
+              "SHOW STATUS LIKE 'wsrep_%';" 2>/dev/null | \
+              grep -E 'wsrep_cluster_size|wsrep_cluster_status|wsrep_local_state_comment|wsrep_ready'
+          delegate_to: "{{ item.host }}"
+          loop: "{{ galera_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: wsrep_status
+          ignore_errors: true
+
+        - name: Display wsrep status
+          ansible.builtin.debug:
+            msg: |
+              Node {{ item.item.name }}:
+              {{ item.stdout | default('(not available)') }}
+          loop: "{{ wsrep_status.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+
+    - name: Check grastate (optional)
+      when: check_grastate | default(false) | bool
+      block:
+        - name: Get grastate.dat from each node
+          ansible.builtin.shell: |
+            docker exec galera-{{ item.name }} cat /var/lib/mysql/grastate.dat 2>/dev/null || echo "Not found"
+          delegate_to: "{{ item.host }}"
+          loop: "{{ galera_nodes }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: grastate_results
+          ignore_errors: true
+
+        - name: Display grastate info
+          ansible.builtin.debug:
+            msg: |
+              Node {{ item.item.name }} grastate:
+              {{ item.stdout | default('(not available)') }}
+          loop: "{{ grastate_results.results }}"
+          loop_control:
+            label: "{{ item.item.name }}"
+
+        - name: Find node with highest seqno
+          ansible.builtin.set_fact:
+            galera_recovery_candidates: >-
+              {{
+                grastate_results.results
+                | selectattr('stdout', 'search', 'seqno:')
+                | map(attribute='item')
+                | list
+              }}
+          when: grastate_results.results | length > 0
+
+        - name: Display recovery recommendation
+          ansible.builtin.debug:
+            msg: |
+              For cluster recovery, bootstrap from the node with the highest seqno.
+              Use: ansible-playbook playbooks/coolify/galera/recover.yml -e bootstrap_node=<node_host>
+          when: galera_recovery_candidates | default([]) | length > 0

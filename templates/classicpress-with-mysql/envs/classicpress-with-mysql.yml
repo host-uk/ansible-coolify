@@ -1,0 +1,9 @@
+# Environment variables for classicpress-with-mysql
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+CLASSICPRESS_DB_PASSWORD: "$SERVICE_PASSWORD_CLASSICPRESS"
+CLASSICPRESS_DB_USER: "$SERVICE_USER_CLASSICPRESS"
+MYSQL_PASSWORD: "$SERVICE_PASSWORD_CLASSICPRESS"
+MYSQL_ROOT_PASSWORD: "$SERVICE_PASSWORD_ROOT"
+MYSQL_USER: "$SERVICE_USER_CLASSICPRESS"

@@ -1,0 +1,7 @@
+# Environment variables for meilisearch
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+MEILI_ENV: "production"
+MEILI_MASTER_KEY: "${SERVICE_PASSWORD_MEILISEARCH}"
+MEILI_NO_ANALYTICS: "true"

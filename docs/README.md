@@ -60,6 +60,11 @@ The project defines clear personas to guide interaction with the platform:
 - **State Persistence**: Critical application keys and database backups are fetched locally to ensure recoverability.
 - **Resource Cloning**: Support for cloning environments and applications across different servers or regions.
 - **Environment Helpers**: Backup detection, restore, templates, and move operations for managing resources across environments.
+- **Shared Infrastructure Platform**: Complete HA database and caching stack for application workloads.
+  - **Galera Cluster**: Multi-master MariaDB replication with automatic failover across 4 nodes.
+  - **Redis Sentinel Cluster**: High-availability Redis with automatic failover.
+  - **PostgreSQL Patroni Cluster**: Automatic failover PostgreSQL with etcd consensus.
+  - **One-Click Apps**: Auto-detect database requirements for 100+ Coolify services.
 - **Worker Registration**: Automatically registers worker nodes into the Coolify controller.
 - **S3 Integration**: Support for both private (infrastructure backup) and public (application storage) buckets on Hetzner Object Storage.
 
@@ -73,6 +78,12 @@ The project defines clear personas to guide interaction with the platform:
 | [Ansible Roles](ansible_roles.md) | Role documentation |
 | [State Management](state_management.md) | Backup and state handling |
 | [Environment Helpers](environment_helpers.md) | Backup, restore, templates, move |
+| [Shared Infrastructure](shared_infrastructure.md) | Complete HA database/caching platform |
+| [Galera Cluster](galera_cluster.md) | MariaDB multi-master replication |
+| [Galera DR](galera_dr.md) | Disaster recovery procedures |
+| [Redis Sentinel](redis_sentinel.md) | HA Redis with automatic failover |
+| [PostgreSQL Patroni](postgresql_patroni.md) | HA PostgreSQL with etcd |
+| [One-Click Apps](oneclick_apps.md) | Auto-configured application deployment |
 | [Docker Dev Environment](docker_dev.md) | Local development with Docker |
 | [Testing](testing.md) | Test suite documentation |
 | [API Modules](api_modules.md) | Coolify API Ansible modules |

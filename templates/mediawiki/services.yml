@@ -1,0 +1,30 @@
+# Service definition for: mediawiki
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=mediawiki -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: mediawiki
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          mediawiki:
+            image: 'mediawiki:latest'
+            environment:
+              - SERVICE_URL_MEDIAWIKI_80
+            volumes:
+              - 'mediawiki-images:/var/www/html/images'
+              - 'mediawiki-sqlite:/var/www/html/data'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://localhost:80'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

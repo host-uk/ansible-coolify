@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  galera:
+    image: {{ galera_mariadb_image }}
+    container_name: galera-{{ galera_node_name }}
+    hostname: {{ galera_node_name }}
+    command:
+      - --wsrep-on=ON
+      - --wsrep-provider=/usr/lib/galera/libgalera_smm.so
+      - --wsrep-cluster-name={{ galera_cluster_name }}
+{% if galera_is_bootstrap %}
+      - --wsrep-new-cluster
+      - --wsrep-cluster-address=gcomm://
+{% else %}
+      - --wsrep-cluster-address={{ galera_cluster_address }}
+{% endif %}
+      - --wsrep-node-name={{ galera_node_name }}
+      - --wsrep-node-address={{ galera_node_ip }}
+      - --wsrep-sst-method={{ galera_sst_method }}
+      - --wsrep-sst-auth={{ galera_sst_user }}:{{ galera_sst_password }}
+      - --binlog-format=ROW
+      - --default-storage-engine=InnoDB
+      - --innodb-autoinc-lock-mode=2
+      - --innodb-flush-log-at-trx-commit=0
+      - --innodb-buffer-pool-size=256M
+    environment:
+      MYSQL_ROOT_PASSWORD: "{{ galera_root_password }}"
+      MYSQL_DATABASE: "{{ galera_app_database }}"
+      MYSQL_USER: "{{ galera_app_user }}"
+      MYSQL_PASSWORD: "{{ galera_app_password }}"
+      MARIADB_GALERA_CLUSTER_NAME: "{{ galera_cluster_name }}"
+    volumes:
+      - galera-data:/var/lib/mysql
+    ports:
+      - "{{ galera_mysql_port }}:3306"
+      - "{{ galera_galera_port }}:4567"
+      - "{{ galera_ist_port }}:4568"
+      - "{{ galera_sst_port }}:4444"
+    networks:
+      - coolify
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p{{ galera_root_password }}"]
+      interval: {{ galera_health_check_interval }}s
+      timeout: {{ galera_health_check_timeout }}s
+      retries: {{ galera_health_check_retries }}
+      start_period: {{ galera_health_check_start_period }}s
+    deploy:
+      resources:
+        limits:
+          memory: {{ galera_memory_limit }}
+          cpus: '{{ galera_cpu_limit }}'
+    restart: unless-stopped
+    extra_hosts:
+{% for node in galera_nodes %}
+      - "{{ node.name }}:{{ node.ip }}"
+{% endfor %}
+      - "{{ galera_hostname }}:{{ galera_node_ip }}"
+
+volumes:
+  galera-data:
+    driver: local
+
+networks:
+  coolify:
+    external: true

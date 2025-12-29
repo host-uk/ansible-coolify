@@ -1,0 +1,46 @@
+---
+# Configure Redis connection for a one-click app
+#
+# Required variables:
+#   shared_redis_hostname: Redis host
+#   shared_redis_port: Redis port
+#   shared_redis_password: Redis password
+
+- name: Validate Redis credentials available
+  ansible.builtin.assert:
+    that:
+      - shared_redis_password | length > 0
+    fail_msg: |
+      Redis password not found.
+      Ensure the Redis Sentinel cluster is deployed and state/redis/password.txt exists.
+    success_msg: "Redis credentials available"
+  when: shared_redis_password is defined
+
+- name: Build Redis connection URL
+  ansible.builtin.set_fact:
+    oneclick_redis_url: "redis://:{{ shared_redis_password }}@{{ shared_redis_hostname }}:{{ shared_redis_port }}/0"
+  when: shared_redis_password | length > 0
+
+- name: Build Redis connection URL without password
+  ansible.builtin.set_fact:
+    oneclick_redis_url: "redis://{{ shared_redis_hostname }}:{{ shared_redis_port }}/0"
+  when: shared_redis_password | length == 0
+
+- name: Build Redis environment variables
+  ansible.builtin.set_fact:
+    oneclick_redis_env_vars:
+      REDIS_HOST: "{{ shared_redis_hostname }}"
+      REDIS_PORT: "{{ shared_redis_port }}"
+      REDIS_PASSWORD: "{{ shared_redis_password }}"
+      REDIS_URL: "{{ oneclick_redis_url }}"
+      CACHE_HOST: "{{ shared_redis_hostname }}"
+      CACHE_PORT: "{{ shared_redis_port }}"
+      CACHE_URL: "{{ oneclick_redis_url }}"
+
+- name: Display Redis configuration
+  ansible.builtin.debug:
+    msg: |
+      Redis Configuration for {{ oneclick_app_name }}:
+        Host: {{ shared_redis_hostname }}
+        Port: {{ shared_redis_port }}
+        URL: redis://***@{{ shared_redis_hostname }}:{{ shared_redis_port }}/0

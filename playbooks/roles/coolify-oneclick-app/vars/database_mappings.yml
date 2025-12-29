@@ -1,0 +1,232 @@
+---
+# Database Mappings for Coolify One-Click Services
+#
+# This file maps Coolify service types to their database requirements.
+# Used by the oneclick-app role for auto-detection and configuration.
+#
+# IMPORTANT: Only include service types that exist in Coolify's one-click catalog.
+# See: playbooks/roles/coolify/module_utils/swagger/coolify_openapi.json
+#
+# Database types: postgresql, mariadb, none
+# Redis: true if Redis/caching is required
+
+# PostgreSQL-based services
+postgresql_services:
+  - chatwoot
+  - directus
+  - directus-with-postgresql
+  - fider
+  - formbricks
+  - gitea
+  - gitea-with-postgresql
+  - glitchtip
+  - grafana
+  - grafana-with-postgresql
+  - listmonk
+  - logto
+  - meilisearch
+  - metabase
+  - minio
+  - n8n
+  - n8n-with-postgresql
+  - nocodb
+  - odoo
+  - penpot
+  - posthog
+  - supabase
+  - trigger
+  - trigger-with-external-database
+  - twenty
+  - umami
+  - unleash-with-postgresql
+
+# MariaDB/MySQL-based services
+mariadb_services:
+  - classicpress-with-mariadb
+  - firefly
+  - classicpress-with-mysql
+  - ghost
+  - gitea-with-mariadb
+  - gitea-with-mysql
+  - mediawiki
+  - moodle
+  - nextcloud
+  - wordpress-with-mariadb
+  - wordpress-with-mysql
+
+# Services that require Redis for caching/queues
+redis_required_services:
+  - chatwoot
+  - listmonk
+  - nextcloud
+  - posthog
+  - supabase
+
+# Standalone services (no external database required)
+standalone_services:
+  - activepieces
+  - appsmith
+  - appwrite
+  - authentik
+  - babybuddy
+  - budge
+  - changedetection
+  - classicpress-without-database
+  - cloudflared
+  - code-server
+  - docker-registry
+  - docuseal
+  - docuseal-with-postgres
+  - dokuwiki
+  - duplicati
+  - emby
+  - embystat
+  - filebrowser
+  - glance
+  - glances
+  - grocy
+  - heimdall
+  - homepage
+  - jellyfin
+  - kuzzle
+  - metube
+  - openblocks
+  - pairdrop
+  - phpmyadmin
+  - pocketbase
+  - reactive-resume
+  - rocketchat
+  - shlink
+  - slash
+  - snapdrop
+  - statusnook
+  - stirling-pdf
+  - syncthing
+  - tolgee
+  - unleash-without-database
+  - uptime-kuma
+  - vaultwarden
+  - vikunja
+  - weblate
+  - whoogle
+  - wordpress-without-database
+
+# Environment variable mappings per database type
+# These are the common env var names used by different services
+env_var_mappings:
+  postgresql:
+    host:
+      - DATABASE_HOST
+      - POSTGRES_HOST
+      - POSTGRESQL_HOST
+      - DB_HOST
+      - PGHOST
+    port:
+      - DATABASE_PORT
+      - POSTGRES_PORT
+      - POSTGRESQL_PORT
+      - DB_PORT
+      - PGPORT
+    database:
+      - DATABASE_NAME
+      - POSTGRES_DB
+      - POSTGRESQL_DATABASE
+      - DB_NAME
+      - PGDATABASE
+    user:
+      - DATABASE_USER
+      - POSTGRES_USER
+      - POSTGRESQL_USER
+      - DB_USER
+      - PGUSER
+    password:
+      - DATABASE_PASSWORD
+      - POSTGRES_PASSWORD
+      - POSTGRESQL_PASSWORD
+      - DB_PASSWORD
+      - PGPASSWORD
+    url:
+      - DATABASE_URL
+      - POSTGRES_URL
+      - POSTGRESQL_URL
+
+  mariadb:
+    host:
+      - DATABASE_HOST
+      - MYSQL_HOST
+      - MARIADB_HOST
+      - DB_HOST
+    port:
+      - DATABASE_PORT
+      - MYSQL_PORT
+      - MARIADB_PORT
+      - DB_PORT
+    database:
+      - DATABASE_NAME
+      - MYSQL_DATABASE
+      - MARIADB_DATABASE
+      - DB_NAME
+    user:
+      - DATABASE_USER
+      - MYSQL_USER
+      - MARIADB_USER
+      - DB_USER
+    password:
+      - DATABASE_PASSWORD
+      - MYSQL_PASSWORD
+      - MARIADB_PASSWORD
+      - DB_PASSWORD
+    url:
+      - DATABASE_URL
+      - MYSQL_URL
+      - MARIADB_URL
+
+  redis:
+    host:
+      - REDIS_HOST
+      - CACHE_HOST
+    port:
+      - REDIS_PORT
+      - CACHE_PORT
+    password:
+      - REDIS_PASSWORD
+      - CACHE_PASSWORD
+    url:
+      - REDIS_URL
+      - CACHE_URL
+
+# Service-specific environment variable overrides
+# Some services use non-standard env var names
+service_env_overrides:
+  chatwoot:
+    postgresql:
+      host: POSTGRES_HOST
+      database: POSTGRES_DATABASE
+      user: POSTGRES_USERNAME
+      password: POSTGRES_PASSWORD
+    redis:
+      url: REDIS_URL
+
+  n8n:
+    postgresql:
+      host: DB_POSTGRESDB_HOST
+      database: DB_POSTGRESDB_DATABASE
+      user: DB_POSTGRESDB_USER
+      password: DB_POSTGRESDB_PASSWORD
+
+  ghost:
+    mariadb:
+      host: database__connection__host
+      database: database__connection__database
+      user: database__connection__user
+      password: database__connection__password
+
+  nextcloud:
+    mariadb:
+      host: MYSQL_HOST
+      database: MYSQL_DATABASE
+      user: MYSQL_USER
+      password: MYSQL_PASSWORD
+    redis:
+      host: REDIS_HOST
+      password: REDIS_HOST_PASSWORD

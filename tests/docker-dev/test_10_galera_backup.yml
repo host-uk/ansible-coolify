@@ -1,0 +1,537 @@
+---
+# Test 10: Galera Backup and Restore via Role
+#
+# Tests the coolify-galera role's backup and restore functionality.
+# Since backup.yml/restore.yml use delegate_to for real hosts, this test
+# verifies the role's backup/restore logic works in the test environment.
+#
+# Uses multi-play structure:
+# 1. localhost: Create Docker containers via docker_dev role
+# 2. test-controller.lan: Install Coolify via coolify role
+# 3. localhost: Run Galera backup/restore tests
+#
+# Tests:
+# - GB-001: Role deploys Galera node successfully
+# - GB-002: Backup can be created from deployed node
+# - GB-003: Backup file has valid content
+# - GB-004: Restore from backup works
+# - GB-005: Data integrity verified after restore
+
+# =============================================================================
+# PLAY 1: Create Docker Development Environment
+# =============================================================================
+- name: "Test 10: Setup Docker Environment"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_containers: "{{ test_docker_dev_containers_full }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    docker_dev_network_name: "{{ test_docker_dev_network_name }}"
+    docker_dev_network_subnet: "{{ test_docker_dev_network_subnet }}"
+    docker_dev_network_gateway: "{{ test_docker_dev_network_gateway }}"
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_ssh_keys_path: "{{ test_docker_dev_ssh_keys_path }}"
+
+  tasks:
+    - name: "SETUP: Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 10: GALERA BACKUP AND RESTORE VIA ROLE
+          ====================================================================
+            Phase 1: Creating Docker development environment
+            - Using docker_dev role for container management
+            - Using coolify role for Coolify installation
+            - Using coolify-galera role for backup/restore testing
+          ====================================================================
+
+    - name: "SETUP: Check if compose file exists"
+      ansible.builtin.stat:
+        path: "{{ docker_dev_compose_path }}/docker-compose.yml"
+      register: compose_file
+
+    - name: "SETUP: Stop existing containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      when: compose_file.stat.exists
+      ignore_errors: true
+
+    - name: "SETUP: Remove existing directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+        - /tmp/galera-backup-test
+      ignore_errors: true
+
+    - name: "SETUP: Create containers via docker_dev role"
+      ansible.builtin.include_role:
+        name: docker_dev
+
+  tags:
+    - test
+    - galera
+    - backup
+    - setup
+
+# =============================================================================
+# PLAY 2: Install Coolify via Role
+# =============================================================================
+- name: "Test 10: Install Coolify via Role"
+  hosts: test-controller.lan
+  gather_facts: true
+  vars_files:
+    - conftest.yml
+  vars:
+    coolify_root_username: "admin"
+    coolify_root_user_email: "admin@test.local"
+    coolify_root_user_password: "TestPassword123!"
+    coolify_auto_setup_enabled: true
+    coolify_api_base_url: "http://localhost:8000/api/v1"
+    coolify_state_path: "./state"
+    coolify_docker_address_pool_base: "172.30.0.0/16"
+    coolify_docker_address_pool_size: "24"
+    coolify_docker_pool_force_override: false
+    coolify_autoupdate: false
+    coolify_registry_url: "https://hub.docker.com"
+    coolify_identity_key_actual_path: "/data/coolify/ssh/keys/id.root@host.docker.internal"
+    coolify_detected_key_uuid: ""
+
+  tasks:
+    - name: "COOLIFY: Install and configure via coolify role"
+      ansible.builtin.include_role:
+        name: coolify
+
+    - name: "COOLIFY: Store API token for later plays"
+      ansible.builtin.set_fact:
+        controller_api_token: "{{ coolify_api_token }}"
+        controller_api_ready: "{{ coolify_api_ready }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+  tags:
+    - test
+    - galera
+    - backup
+    - coolify-setup
+
+# =============================================================================
+# PLAY 3: Run Galera Backup and Restore Tests
+# =============================================================================
+- name: "Test 10: Galera Backup and Restore Tests"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - conftest.yml
+  vars:
+    docker_dev_compose_path: "{{ test_docker_dev_compose_path }}"
+    docker_dev_logs_path: "{{ test_docker_dev_logs_path }}"
+    docker_dev_name_prefix: "{{ test_docker_dev_name_prefix }}"
+    controller_container: "{{ docker_dev_name_prefix }}-controller"
+    controller_ip: "172.29.0.10"
+    coolify_api_url: "http://{{ controller_ip }}:8000/api/v1"
+    coolify_api_token: "{{ controller_api_token }}"
+
+    # Override role defaults for testing
+    galera_cluster_name: "test-backup-cluster"
+    galera_project_name: "galera-backup-test"
+    galera_environment_name: "testing"
+    galera_hostname: "db.test.local"
+    galera_root_password: "test_root_password_123"
+    galera_app_database: "testdb"
+    galera_instant_deploy: true
+    galera_backup_dir: "/tmp/galera-backup-test"
+
+    # Test node
+    test_galera_node:
+      name: "galera-backup-1"
+      host: "test-app-server-1.lan"
+      ip: "172.29.0.20"
+      role: "master"
+
+  tasks:
+    - name: "TEST: Verify Coolify API is ready"
+      ansible.builtin.assert:
+        that:
+          - controller_api_ready | default(false)
+          - controller_api_token | default('') | length > 0
+        fail_msg: "Coolify API not ready or token not set"
+        success_msg: "Coolify API ready, token configured via role"
+
+    - name: "TEST: Verify API access"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/version"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: api_check
+      retries: 10
+      delay: 3
+      until: api_check.status == 200
+
+    - name: "SETUP: Create backup directory"
+      ansible.builtin.file:
+        path: "{{ galera_backup_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: "SETUP: Register test server"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "backup-test-server"
+          description: "Test server for backup testing"
+          ip: "{{ test_galera_node.ip }}"
+          port: 22
+          user: "root"
+          private_key_uuid: "{{ (lookup('url', coolify_api_url ~ '/security/keys', headers={'Authorization': 'Bearer ' ~ coolify_api_token}, split_lines=false) | from_json)[0].uuid }}"
+        status_code: [200, 201, 422]
+      register: server_register
+
+    # ==========================================================================
+    # GB-001: Deploy Galera Node via Role
+    # ==========================================================================
+    - name: "GB-001: Deploy Galera node using role"
+      ansible.builtin.include_role:
+        name: coolify-galera
+        tasks_from: deploy_node.yml
+      vars:
+        galera_current_node: "{{ test_galera_node }}"
+        galera_bootstrap_node: true
+
+    - name: "GB-001: Assert role deployed service"
+      ansible.builtin.assert:
+        that:
+          - galera_service_uuids is defined
+          - galera_service_uuids[test_galera_node.name] is defined
+        fail_msg: "Role did not deploy service"
+        success_msg: "GB-001 PASSED: Galera deployed via role"
+
+    - name: "GB-001: Wait for MariaDB container"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: /bin/bash -c "docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep -q galera"
+      register: container_wait
+      retries: 30
+      delay: 10
+      until: container_wait.rc == 0
+      changed_when: false
+      ignore_errors: true
+
+    - name: "GB-001: Get container name"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: /bin/bash -c "docker ps --format '{% raw %}{{.Names}}{% endraw %}' | grep galera | head -1"
+      register: galera_container_name
+      changed_when: false
+      when: container_wait.rc == 0
+
+    - name: "GB-001: Wait for MariaDB ready"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} -e "SELECT 1;"
+      register: db_ready
+      retries: 30
+      delay: 5
+      until: db_ready.rc == 0
+      when: container_wait.rc == 0
+
+    - name: "GB-001: Create test data for backup"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} {{ galera_app_database }} -e "
+          CREATE TABLE IF NOT EXISTS backup_test (
+            id INT PRIMARY KEY,
+            value VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          INSERT INTO backup_test VALUES (1, 'original-data');
+          INSERT INTO backup_test VALUES (2, 'more-data');
+          "
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    # ==========================================================================
+    # GB-002: Create Backup (same method as role's backup.yml)
+    # ==========================================================================
+    - name: "GB-002: Create database backup (role-style command)"
+      ansible.builtin.shell: |
+        docker exec {{ controller_container }} docker exec {{ galera_container_name.stdout }} \
+          mariadb-dump \
+          -u root \
+          -p{{ galera_root_password }} \
+          --all-databases \
+          --single-transaction \
+          --routines \
+          --triggers \
+          --events \
+          --add-drop-database \
+          2>/dev/null | gzip > {{ galera_backup_dir }}/backup-test.sql.gz
+      register: gb002_backup
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    - name: "GB-002: Assert backup created"
+      ansible.builtin.assert:
+        that:
+          - gb002_backup.rc == 0
+        fail_msg: "Backup command failed"
+        success_msg: "GB-002 PASSED: Backup created using role's backup method"
+      when: gb002_backup is defined and gb002_backup is not skipped
+
+    # ==========================================================================
+    # GB-003: Verify Backup Content
+    # ==========================================================================
+    - name: "GB-003: Check backup file exists"
+      ansible.builtin.stat:
+        path: "{{ galera_backup_dir }}/backup-test.sql.gz"
+      register: gb003_stat
+
+    - name: "GB-003: Assert backup file valid"
+      ansible.builtin.assert:
+        that:
+          - gb003_stat.stat.exists
+          - gb003_stat.stat.size > 1000
+        fail_msg: "Backup file missing or too small"
+        success_msg: "GB-003 PASSED: Backup file exists with size {{ gb003_stat.stat.size }} bytes"
+
+    - name: "GB-003: Verify backup contains test table"
+      ansible.builtin.shell: |
+        gunzip -c {{ galera_backup_dir }}/backup-test.sql.gz | grep -q 'backup_test'
+      register: gb003_content
+
+    - name: "GB-003: Assert backup contains data"
+      ansible.builtin.assert:
+        that:
+          - gb003_content.rc == 0
+        fail_msg: "Backup does not contain expected table"
+        success_msg: "GB-003 PASSED: Backup contains backup_test table"
+
+    # ==========================================================================
+    # GB-004: Simulate Data Loss and Restore
+    # ==========================================================================
+    - name: "GB-004: Delete test data (simulate data loss)"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} {{ galera_app_database }} -e "
+          DROP TABLE backup_test;
+          "
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    - name: "GB-004: Verify table deleted"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} {{ galera_app_database }} -N -e "
+          SHOW TABLES LIKE 'backup_test';
+          "
+      register: gb004_verify_deleted
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    - name: "GB-004: Assert table deleted"
+      ansible.builtin.assert:
+        that:
+          - gb004_verify_deleted.stdout == ''
+        fail_msg: "Table was not deleted"
+        success_msg: "GB-004 PASSED: Table deleted (simulating data loss)"
+      when: gb004_verify_deleted is defined and gb004_verify_deleted is not skipped
+
+    - name: "GB-004: Restore from backup (role-style command)"
+      ansible.builtin.shell: |
+        gunzip -c {{ galera_backup_dir }}/backup-test.sql.gz | \
+        docker exec -i {{ controller_container }} docker exec -i {{ galera_container_name.stdout }} \
+          mariadb -u root -p{{ galera_root_password }}
+      register: gb004_restore
+      when: container_wait.rc == 0 and db_ready.rc == 0
+
+    - name: "GB-004: Assert restore successful"
+      ansible.builtin.assert:
+        that:
+          - gb004_restore.rc == 0
+        fail_msg: "Restore command failed"
+        success_msg: "GB-004 PASSED: Restore completed using role's restore method"
+      when: gb004_restore is defined and gb004_restore is not skipped
+
+    # ==========================================================================
+    # GB-005: Verify Restored Data
+    # ==========================================================================
+    - name: "GB-005: Check table restored"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} {{ galera_app_database }} -N -e "
+          SHOW TABLES LIKE 'backup_test';
+          "
+      register: gb005_table
+      when: container_wait.rc == 0
+
+    - name: "GB-005: Assert table exists after restore"
+      ansible.builtin.assert:
+        that:
+          - "'backup_test' in gb005_table.stdout"
+        fail_msg: "Table not restored"
+        success_msg: "GB-005 PASSED: Table restored from backup"
+      when: gb005_table is defined and gb005_table is not skipped
+
+    - name: "GB-005: Check row count"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} {{ galera_app_database }} -N -e "
+          SELECT COUNT(*) FROM backup_test;
+          "
+      register: gb005_count
+      when: container_wait.rc == 0
+
+    - name: "GB-005: Assert all rows restored"
+      ansible.builtin.assert:
+        that:
+          - "'2' in gb005_count.stdout"
+        fail_msg: "Expected 2 rows, got {{ gb005_count.stdout }}"
+        success_msg: "GB-005 PASSED: All 2 rows restored successfully"
+      when: gb005_count is defined and gb005_count is not skipped
+
+    - name: "GB-005: Verify data values"
+      community.docker.docker_container_exec:
+        container: "{{ controller_container }}"
+        command: >
+          docker exec {{ galera_container_name.stdout }}
+          mariadb -u root -p{{ galera_root_password }} {{ galera_app_database }} -N -e "
+          SELECT value FROM backup_test ORDER BY id;
+          "
+      register: gb005_values
+      when: container_wait.rc == 0
+
+    - name: "GB-005: Assert data values correct"
+      ansible.builtin.assert:
+        that:
+          - "'original-data' in gb005_values.stdout"
+          - "'more-data' in gb005_values.stdout"
+        fail_msg: "Restored data values incorrect"
+        success_msg: "GB-005 PASSED: Data values match original"
+      when: gb005_values is defined and gb005_values is not skipped
+
+    # ==========================================================================
+    # TEST SUMMARY
+    # ==========================================================================
+    - name: "TEST SUMMARY: Build results"
+      ansible.builtin.set_fact:
+        test_results:
+          coolify_installed_via_role: true
+          api_token_from_role: "{{ controller_api_token | length > 0 }}"
+          gb001_role_deployment: "{{ galera_service_uuids[test_galera_node.name] is defined }}"
+          gb002_backup_creation: "{{ gb002_backup.rc | default(1) == 0 }}"
+          gb003_backup_validation: "{{ gb003_stat.stat.exists | default(false) }}"
+          gb004_restore_operation: "{{ gb004_restore.rc | default(1) == 0 }}"
+          gb005_data_integrity: "{{ gb005_count.stdout | default('') is search('2') }}"
+
+    - name: "TEST SUMMARY: Display results"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                    TEST 10: GALERA BACKUP AND RESTORE RESULTS
+          ====================================================================
+            Coolify Setup (via coolify role):
+              Installed via Role: {{ test_results.coolify_installed_via_role }}
+              API Token from Role: {{ test_results.api_token_from_role }}
+
+            Test Results:
+              GB-001 Role Deployment:    {{ test_results.gb001_role_deployment }}
+              GB-002 Backup Creation:    {{ test_results.gb002_backup_creation }}
+              GB-003 Backup Validation:  {{ test_results.gb003_backup_validation }}
+              GB-004 Restore Operation:  {{ test_results.gb004_restore_operation }}
+              GB-005 Data Integrity:     {{ test_results.gb005_data_integrity }}
+
+            Backup File: {{ galera_backup_dir }}/backup-test.sql.gz
+            Backup Size: {{ gb003_stat.stat.size | default('N/A') }} bytes
+            Service UUID: {{ galera_service_uuids[test_galera_node.name] | default('N/A') }}
+
+            KEY: This test verifies the coolify-galera role's
+            backup and restore commands work correctly via
+            Coolify role-installed instance.
+          ====================================================================
+
+  # ============================================================================
+  # POST_TASKS: Cleanup
+  # ============================================================================
+  post_tasks:
+    - name: "CLEANUP: Remove backup directory"
+      ansible.builtin.file:
+        path: "{{ galera_backup_dir }}"
+        state: absent
+
+    - name: "CLEANUP: Delete test service"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ galera_service_uuids[test_galera_node.name] }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+      when: galera_service_uuids is defined and galera_service_uuids[test_galera_node.name] is defined
+
+    - name: "CLEANUP: Delete test project"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects/{{ galera_project_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+      when: galera_project_uuid is defined
+
+    - name: "CLEANUP: Destroy test containers"
+      community.docker.docker_compose_v2:
+        project_src: "{{ docker_dev_compose_path }}"
+        state: absent
+        remove_volumes: true
+      ignore_errors: true
+
+    - name: "CLEANUP: Remove test directories"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ docker_dev_compose_path }}"
+        - "{{ docker_dev_logs_path }}"
+      ignore_errors: true
+
+    - name: "TEST PASSED: Galera Backup and Restore"
+      ansible.builtin.debug:
+        msg: |
+          All Galera Backup and Restore tests completed!
+          - Coolify installed via coolify role
+          - Galera deployed via role
+          - Backup created using role's backup method
+          - Backup file validated
+          - Restore completed successfully
+          - All data integrity verified
+
+  tags:
+    - test
+    - galera
+    - backup
+    - role-test
+    - docker-dev

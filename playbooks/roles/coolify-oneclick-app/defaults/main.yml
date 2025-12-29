@@ -1,0 +1,52 @@
+---
+# One-Click App Deployment Configuration
+#
+# This role deploys Coolify one-click services and automatically
+# configures them to use shared infrastructure (Galera, Redis, PostgreSQL)
+
+# App Configuration
+oneclick_app_name: ""
+oneclick_service_type: ""
+oneclick_app_description: ""
+
+# Coolify Integration
+oneclick_project_name: "oneclick-apps"
+oneclick_environment_name: "production"
+oneclick_instant_deploy: true
+
+# Shared Infrastructure Hostnames
+# These should match your Galera, Redis, and PostgreSQL cluster configurations
+shared_mariadb_hostname: "db.host.uk.com"
+shared_mariadb_port: 3306
+shared_redis_hostname: "cache.host.uk.com"
+shared_redis_port: 6379
+shared_postgresql_hostname: "db.postgres.host.uk.com"
+shared_postgresql_port: 5432
+
+# Shared Infrastructure Credentials (should be loaded from state/)
+shared_mariadb_root_password: "{{ lookup('password', 'state/galera/root_password.txt', errors='ignore') | default('') }}"
+shared_redis_password: "{{ lookup('password', 'state/redis/password.txt', errors='ignore') | default('') }}"
+shared_postgresql_superuser_password: "{{ lookup('password', 'state/postgresql/superuser_password.txt', errors='ignore') | default('') }}"
+
+# App-specific database credentials (generated per app)
+oneclick_db_name: "{{ oneclick_app_name | regex_replace('[^a-zA-Z0-9]', '_') }}"
+oneclick_db_user: "{{ oneclick_app_name | regex_replace('[^a-zA-Z0-9]', '_') }}_user"
+oneclick_db_password: "{{ lookup('password', 'state/oneclick/' ~ oneclick_app_name ~ '/db_password.txt length=32 chars=ascii_letters,digits') }}"
+
+# Auto-detection settings
+oneclick_auto_detect_database: true
+oneclick_auto_create_database: true
+oneclick_auto_configure_redis: true
+
+# Resource Limits
+oneclick_memory_limit: "1g"
+oneclick_cpu_limit: "1"
+
+# Health check settings
+oneclick_health_check_interval: 30
+oneclick_health_check_timeout: 10
+oneclick_health_check_retries: 3
+oneclick_health_check_start_period: 60
+
+# Deployment timeout
+oneclick_deploy_timeout: 300

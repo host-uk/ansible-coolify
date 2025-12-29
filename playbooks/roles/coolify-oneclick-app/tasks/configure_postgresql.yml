@@ -1,0 +1,119 @@
+---
+# Create PostgreSQL database and user for a one-click app
+#
+# Required variables:
+#   oneclick_app_name: App name (used for database name)
+#   oneclick_db_name: Database name
+#   oneclick_db_user: Database user
+#   oneclick_db_password: Database password
+#   shared_postgresql_hostname: PostgreSQL host
+#   shared_postgresql_superuser_password: Superuser password
+
+- name: Validate PostgreSQL credentials available
+  ansible.builtin.assert:
+    that:
+      - shared_postgresql_superuser_password | length > 0
+    fail_msg: |
+      PostgreSQL superuser password not found.
+      Ensure the PostgreSQL Patroni cluster is deployed and state/postgresql/superuser_password.txt exists.
+    success_msg: "PostgreSQL credentials available"
+
+- name: Find PostgreSQL Patroni container
+  ansible.builtin.command:
+    cmd: docker ps --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name=patroni"
+  register: patroni_container
+  changed_when: false
+  ignore_errors: true
+
+- name: Use direct PostgreSQL connection if Patroni not found
+  ansible.builtin.set_fact:
+    postgresql_container: "{{ patroni_container.stdout_lines | first | default('') }}"
+
+- name: Create database for app
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ postgresql_container }}
+      psql -U postgres -c "CREATE DATABASE {{ oneclick_db_name }};"
+  environment:
+    PGPASSWORD: "{{ shared_postgresql_superuser_password }}"
+  register: create_db
+  changed_when: "'CREATE DATABASE' in create_db.stdout"
+  failed_when: false
+  when: postgresql_container | length > 0
+  no_log: true
+
+- name: Check if database exists
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ postgresql_container }}
+      psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname='{{ oneclick_db_name }}';"
+  environment:
+    PGPASSWORD: "{{ shared_postgresql_superuser_password }}"
+  register: db_exists
+  changed_when: false
+  when: postgresql_container | length > 0
+  no_log: true
+
+- name: Create user for app
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ postgresql_container }}
+      psql -U postgres -c "CREATE USER {{ oneclick_db_user }} WITH PASSWORD '{{ oneclick_db_password }}';"
+  environment:
+    PGPASSWORD: "{{ shared_postgresql_superuser_password }}"
+  register: create_user
+  changed_when: "'CREATE ROLE' in create_user.stdout"
+  failed_when: false
+  when: postgresql_container | length > 0
+  no_log: true
+
+- name: Grant privileges to user
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ postgresql_container }}
+      psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE {{ oneclick_db_name }} TO {{ oneclick_db_user }};"
+  environment:
+    PGPASSWORD: "{{ shared_postgresql_superuser_password }}"
+  changed_when: true
+  when: postgresql_container | length > 0
+  no_log: true
+
+- name: Grant schema privileges
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ postgresql_container }}
+      psql -U postgres -d {{ oneclick_db_name }} -c "GRANT ALL ON SCHEMA public TO {{ oneclick_db_user }};"
+  environment:
+    PGPASSWORD: "{{ shared_postgresql_superuser_password }}"
+  changed_when: true
+  when: postgresql_container | length > 0
+  no_log: true
+
+- name: Build PostgreSQL connection URL
+  ansible.builtin.set_fact:
+    oneclick_postgresql_url: "postgresql://{{ oneclick_db_user }}:{{ oneclick_db_password }}@{{ shared_postgresql_hostname }}:{{ shared_postgresql_port }}/{{ oneclick_db_name }}"
+
+- name: Build PostgreSQL environment variables
+  ansible.builtin.set_fact:
+    oneclick_postgresql_env_vars:
+      DATABASE_HOST: "{{ shared_postgresql_hostname }}"
+      DATABASE_PORT: "{{ shared_postgresql_port }}"
+      DATABASE_NAME: "{{ oneclick_db_name }}"
+      DATABASE_USER: "{{ oneclick_db_user }}"
+      DATABASE_PASSWORD: "{{ oneclick_db_password }}"
+      DATABASE_URL: "{{ oneclick_postgresql_url }}"
+      POSTGRES_HOST: "{{ shared_postgresql_hostname }}"
+      POSTGRES_PORT: "{{ shared_postgresql_port }}"
+      POSTGRES_DB: "{{ oneclick_db_name }}"
+      POSTGRES_USER: "{{ oneclick_db_user }}"
+      POSTGRES_PASSWORD: "{{ oneclick_db_password }}"
+
+- name: Display PostgreSQL configuration
+  ansible.builtin.debug:
+    msg: |
+      PostgreSQL Configuration for {{ oneclick_app_name }}:
+        Host: {{ shared_postgresql_hostname }}
+        Port: {{ shared_postgresql_port }}
+        Database: {{ oneclick_db_name }}
+        User: {{ oneclick_db_user }}
+        Database exists: {{ db_exists.stdout | default('') == '1' }}

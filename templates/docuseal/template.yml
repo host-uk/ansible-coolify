@@ -1,0 +1,9 @@
+# Template: docuseal
+# Auto-generated from service test
+# Date: 2025-12-29T03:24:09+00:00
+
+name: docuseal
+service_type: docuseal
+source: automated-test
+tested: true
+test_date: 2025-12-29T03:24:09+00:00

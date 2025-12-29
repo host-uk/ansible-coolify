@@ -1,0 +1,5 @@
+# Environment variables for nextcloud
+# User-configurable values (Coolify-managed vars excluded)
+# Auto-generated from successful service test
+
+TZ: "Europe/Madrid"

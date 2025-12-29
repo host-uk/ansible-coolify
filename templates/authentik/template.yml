@@ -1,0 +1,9 @@
+# Template: authentik
+# Auto-generated from service test
+# Date: 2025-12-29T03:07:06+00:00
+
+name: authentik
+service_type: authentik
+source: automated-test
+tested: true
+test_date: 2025-12-29T03:07:06+00:00

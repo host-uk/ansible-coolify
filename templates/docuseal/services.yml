@@ -1,0 +1,31 @@
+# Service definition for: docuseal
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=docuseal -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: docuseal
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          docuseal:
+            image: 'docuseal/docuseal:latest'
+            environment:
+              - SERVICE_URL_DOCUSEAL_3000
+              - 'HOST=${SERVICE_URL_DOCUSEAL}'
+            volumes:
+              - 'docuseal-data:/data'
+            healthcheck:
+              test:
+                - CMD
+                - wget
+                - '-q'
+                - '--spider'
+                - 'http://127.0.0.1:3000'
+              interval: 5s
+              timeout: 20s
+              retries: 10
+

@@ -1,0 +1,107 @@
+---
+# Verify Redis Sentinel cluster health
+# Checks master, replicas, and sentinel status
+#
+# Required variables:
+#   redis_nodes: List of all cluster nodes
+#   redis_password: Redis authentication password
+#   redis_master_name: Sentinel master name
+
+- name: "Initialize health check results"
+  ansible.builtin.set_fact:
+    redis_health_results: {}
+
+- name: "Get master node info from sentinel"
+  ansible.builtin.command:
+    cmd: >
+      docker exec sentinel-{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).name }}
+      redis-cli -p 26379 sentinel master {{ redis_master_name }}
+  register: redis_sentinel_master
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).host }}"
+
+- name: "Parse sentinel master info"
+  ansible.builtin.set_fact:
+    redis_health_results: >-
+      {{
+        redis_health_results | combine({
+          'sentinel_master_info': redis_sentinel_master.stdout | default('ERROR'),
+          'sentinel_reachable': redis_sentinel_master.rc == 0
+        })
+      }}
+
+- name: "Get replica count from sentinel"
+  ansible.builtin.command:
+    cmd: >
+      docker exec sentinel-{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).name }}
+      redis-cli -p 26379 sentinel replicas {{ redis_master_name }}
+  register: redis_sentinel_replicas
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).host }}"
+
+- name: "Get sentinel count"
+  ansible.builtin.command:
+    cmd: >
+      docker exec sentinel-{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).name }}
+      redis-cli -p 26379 sentinel sentinels {{ redis_master_name }}
+  register: redis_sentinel_count
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'in', ['master', 'replica']) | first).host }}"
+
+- name: "Check master Redis health"
+  ansible.builtin.command:
+    cmd: >
+      docker exec redis-{{ (redis_nodes | selectattr('role', 'equalto', 'master') | first).name }}
+      redis-cli -a {{ redis_password }} INFO replication
+  register: redis_master_health
+  changed_when: false
+  ignore_errors: true
+  delegate_to: "{{ (redis_nodes | selectattr('role', 'equalto', 'master') | first).host }}"
+  no_log: true
+
+- name: "Parse master health"
+  ansible.builtin.set_fact:
+    redis_master_healthy: "{{ redis_master_health.rc == 0 and 'role:master' in (redis_master_health.stdout | default('')) }}"
+    redis_connected_slaves: >-
+      {{
+        (redis_master_health.stdout | default(''))
+        | regex_search('connected_slaves:(\d+)', '\1')
+        | default(['0'])
+        | first
+      }}
+
+- name: "Build health summary"
+  ansible.builtin.set_fact:
+    redis_health_summary:
+      cluster_name: "{{ redis_cluster_name }}"
+      master_name: "{{ redis_master_name }}"
+      master_healthy: "{{ redis_master_healthy }}"
+      sentinel_reachable: "{{ redis_health_results.sentinel_reachable | default(false) }}"
+      connected_replicas: "{{ redis_connected_slaves }}"
+      expected_replicas: "{{ redis_nodes | selectattr('role', 'equalto', 'replica') | list | length }}"
+      total_nodes: "{{ redis_nodes | length }}"
+
+- name: "Display health check results"
+  ansible.builtin.debug:
+    msg: |
+      Redis Sentinel Cluster Health Check:
+        Cluster: {{ redis_health_summary.cluster_name }}
+        Master Name: {{ redis_health_summary.master_name }}
+
+        Status:
+          Master Healthy: {{ redis_health_summary.master_healthy }}
+          Sentinel Reachable: {{ redis_health_summary.sentinel_reachable }}
+          Connected Replicas: {{ redis_health_summary.connected_replicas }}/{{ redis_health_summary.expected_replicas }}
+          Total Nodes: {{ redis_health_summary.total_nodes }}
+
+        Result: {{ 'HEALTHY' if (redis_health_summary.master_healthy and redis_health_summary.sentinel_reachable) else 'DEGRADED' }}
+
+- name: "Fail if cluster unhealthy"
+  ansible.builtin.fail:
+    msg: "Redis Sentinel cluster is not healthy. Master: {{ redis_health_summary.master_healthy }}, Sentinel: {{ redis_health_summary.sentinel_reachable }}"
+  when:
+    - not redis_health_summary.master_healthy or not redis_health_summary.sentinel_reachable
+    - redis_health_fail_on_error | default(true)

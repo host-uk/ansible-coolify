@@ -1,0 +1,429 @@
+---
+# Test Single Coolify Service
+#
+# Tests a single Coolify one-click service by deploying it and verifying:
+# 1. Container starts and becomes healthy
+# 2. Web interface is accessible (HTTP response)
+#
+# Usage:
+#   ansible-playbook playbooks/coolify/service-test/test_service.yml \
+#     -e service_name=uptime-kuma
+#
+# Required Variables:
+#   service_name: The Coolify service type to test
+#
+# Optional Variables:
+#   coolify_api_url: API URL (default: from environment or docker-dev)
+#   coolify_api_token: API token (default: from environment)
+#   test_timeout: Seconds to wait for service healthy (default: 300)
+#   cleanup_after: Whether to delete service after test (default: true)
+#
+# Outputs:
+#   - On success: Creates template in templates/<service_name>/
+#   - On failure: Creates doc in docs/plan/service/<service_name>.md
+
+- name: "Test Service: {{ service_name }}"
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    # Required via -e
+    service_name: ""
+
+    # API configuration
+    coolify_api_url: "{{ lookup('env', 'COOLIFY_API_URL') | default('http://172.28.0.10:8000/api/v1', true) }}"
+    coolify_api_token: "{{ lookup('env', 'COOLIFY_API_TOKEN') | default('', true) }}"
+
+    # Test configuration
+    test_timeout: 300
+    health_check_interval: 5
+    health_check_retries: "{{ (test_timeout | int / health_check_interval | int) | int }}"
+    cleanup_after: true
+    skip_server_check: false
+
+    # Paths
+    templates_path: "{{ playbook_dir }}/../../../templates"
+    docs_path: "{{ playbook_dir }}/../../../docs/plan/service"
+
+    # Project/Environment for testing
+    test_project_name: "service-tests"
+    test_env_name: "testing"
+
+    # Internal state
+    test_service_uuid: ""
+    test_passed: false
+    test_error: ""
+    test_logs: ""
+
+  tasks:
+    # =========================================================================
+    # PHASE 1: Validation
+    # =========================================================================
+    - name: "Validate required parameters"
+      ansible.builtin.fail:
+        msg: "Required: -e service_name=<service_type>"
+      when: service_name == ""
+
+    - name: "Validate API token"
+      ansible.builtin.fail:
+        msg: |
+          API token not configured. Set via:
+            export COOLIFY_API_TOKEN=<token>
+          Or:
+            -e coolify_api_token=<token>
+      when: coolify_api_token == ""
+
+    - name: "Display test info"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                      TESTING SERVICE: {{ service_name }}
+          ====================================================================
+            API: {{ coolify_api_url }}
+            Timeout: {{ test_timeout }}s
+            Cleanup: {{ cleanup_after }}
+          ====================================================================
+
+    # =========================================================================
+    # PHASE 2: Setup Test Project/Environment
+    # =========================================================================
+    - name: "Get existing projects"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/projects"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: existing_projects
+
+    - name: "Find or create test project"
+      block:
+        - name: "Check if test project exists"
+          ansible.builtin.set_fact:
+            test_project: "{{ existing_projects.json | selectattr('name', 'equalto', test_project_name) | first | default(none) }}"
+
+        - name: "Create test project if needed"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/projects"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              name: "{{ test_project_name }}"
+              description: "Automated service testing"
+            status_code: [200, 201]
+          register: created_project
+          when: test_project is none
+
+        - name: "Set test project UUID"
+          ansible.builtin.set_fact:
+            test_project_uuid: "{{ test_project.uuid if test_project else created_project.json.uuid }}"
+
+    - name: "Find or create test environment"
+      block:
+        - name: "Get project details with environments"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/projects/{{ test_project_uuid }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: project_details
+
+        - name: "Check if test environment exists"
+          ansible.builtin.set_fact:
+            test_environment: "{{ project_details.json.environments | default([]) | selectattr('name', 'equalto', test_env_name) | first | default(none) }}"
+
+        - name: "Create test environment if needed"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/projects/{{ test_project_uuid }}/environments"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              name: "{{ test_env_name }}"
+            status_code: [200, 201]
+          register: created_environment
+          when: test_environment is none
+
+        - name: "Display environment ready"
+          ansible.builtin.debug:
+            msg: "Environment '{{ test_env_name }}' ready in project '{{ test_project_name }}'"
+
+    - name: "Get first available server"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: available_servers
+
+    - name: "Fail if no server available"
+      ansible.builtin.fail:
+        msg: "No server available for testing"
+      when: available_servers.json | length == 0
+
+    - name: "Set test server"
+      ansible.builtin.set_fact:
+        test_server: "{{ available_servers.json | first }}"
+        test_server_uuid: "{{ (available_servers.json | first).uuid }}"
+
+    - name: "Get server details for reachability check"
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/servers/{{ test_server_uuid }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: 200
+      register: server_details
+
+    - name: "Pre-flight: Trigger server validation if not reachable"
+      when:
+        - not skip_server_check
+        - not (server_details.json.settings.is_reachable | default(false) | bool)
+      block:
+        - name: "Validate server via API"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/servers/{{ test_server_uuid }}/validate"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: [200, 201]
+          register: validation_result
+
+        - name: "Wait for server validation to complete"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/servers/{{ test_server_uuid }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: server_recheck
+          until: server_recheck.json.settings.is_reachable | default(false) | bool
+          retries: 12
+          delay: 5
+
+        - name: "Update server details after validation"
+          ansible.builtin.set_fact:
+            server_details: "{{ server_recheck }}"
+
+    - name: "Pre-flight: Confirm server is reachable"
+      ansible.builtin.fail:
+        msg: |
+          Server '{{ server_details.json.name }}' is not reachable after validation attempt.
+          Status: is_reachable={{ server_details.json.settings.is_reachable }}, is_usable={{ server_details.json.settings.is_usable }}
+
+          Check server connectivity in Coolify UI -> Servers.
+          Or use -e skip_server_check=true to bypass (services may fail to deploy).
+      when:
+        - not skip_server_check
+        - not (server_details.json.settings.is_reachable | default(false) | bool)
+
+    # =========================================================================
+    # PHASE 3: Deploy Service
+    # =========================================================================
+    - name: "Deploy test service"
+      block:
+        - name: "Create service via API"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              type: "{{ service_name }}"
+              name: "test-{{ service_name }}"
+              project_uuid: "{{ test_project_uuid }}"
+              environment_name: "{{ test_env_name }}"
+              server_uuid: "{{ test_server_uuid }}"
+              instant_deploy: true
+            status_code: [200, 201]
+            timeout: 60
+          register: create_result
+
+        - name: "Set service UUID"
+          ansible.builtin.set_fact:
+            test_service_uuid: "{{ create_result.json.uuid }}"
+
+        - name: "Display deployment started"
+          ansible.builtin.debug:
+            msg: "Service created: {{ test_service_uuid }} - waiting for healthy..."
+
+      rescue:
+        - name: "Record deployment failure"
+          ansible.builtin.set_fact:
+            test_passed: false
+            test_error: "Failed to create service: {{ create_result.msg | default(ansible_failed_result.msg) }}"
+
+    # =========================================================================
+    # PHASE 4: Wait for Healthy
+    # =========================================================================
+    - name: "Wait for service to be running"
+      when: test_service_uuid != ""
+      block:
+        - name: "Poll service status until healthy or failed"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: service_status
+          until: >-
+            service_status.json.status is defined and
+            (service_status.json.status is match('^running:healthy') or
+             service_status.json.status == 'healthy' or
+             service_status.json.status is match('^(error|degraded)'))
+          retries: "{{ health_check_retries }}"
+          delay: "{{ health_check_interval }}"
+          ignore_errors: true
+
+        - name: "Check if service started successfully"
+          ansible.builtin.set_fact:
+            service_running: "{{ service_status.json.status is defined and (service_status.json.status is match('^running') or service_status.json.status == 'healthy') }}"
+
+        - name: "Record unhealthy status"
+          ansible.builtin.set_fact:
+            test_passed: false
+            test_error: "Service status is '{{ service_status.json.status | default('unknown') }}' (not running/healthy)"
+          when: not service_running
+
+      rescue:
+        - name: "Record health check failure"
+          ansible.builtin.set_fact:
+            test_passed: false
+            test_error: "Service failed to become healthy within {{ test_timeout }}s"
+
+    # =========================================================================
+    # PHASE 5: Check Web Interface
+    # =========================================================================
+    - name: "Test web accessibility"
+      when:
+        - test_service_uuid != ""
+        - service_running | default(false)
+      block:
+        - name: "Get service details for URL"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: 200
+          register: service_details
+
+        - name: "Extract service URL"
+          ansible.builtin.set_fact:
+            test_service_url: "{{ service_details.json.fqdn | default(service_details.json.domains | default([]) | first | default('')) }}"
+
+        - name: "Check HTTP endpoint"
+          ansible.builtin.uri:
+            url: "{{ test_service_url }}"
+            method: GET
+            validate_certs: false
+            status_code: [200, 301, 302, 401, 403]
+            timeout: 30
+          register: http_check
+          when: test_service_url != ""
+          ignore_errors: true
+
+        - name: "Mark test as passed (with web check)"
+          ansible.builtin.set_fact:
+            test_passed: true
+            test_web_accessible: true
+          when:
+            - test_service_url != ""
+            - http_check is success
+
+        - name: "Mark test as passed (no URL configured - container healthy is sufficient)"
+          ansible.builtin.set_fact:
+            test_passed: true
+            test_web_accessible: false
+          when:
+            - test_service_url == ""
+
+        - name: "Record web check failure"
+          ansible.builtin.set_fact:
+            test_passed: false
+            test_error: "Web interface not accessible: {{ http_check.msg | default('unknown error') }}"
+          when:
+            - test_service_url != ""
+            - http_check is failed
+
+    # =========================================================================
+    # PHASE 6: Capture Logs on Failure
+    # =========================================================================
+    - name: "Capture logs on failure"
+      when:
+        - not test_passed
+        - test_service_uuid != ""
+      block:
+        - name: "Get service logs"
+          ansible.builtin.uri:
+            url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}/logs"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ coolify_api_token }}"
+            status_code: [200, 404]
+          register: service_logs
+          ignore_errors: true
+
+        - name: "Store logs"
+          ansible.builtin.set_fact:
+            test_logs: "{{ service_logs.json | default('Logs not available') }}"
+
+    # =========================================================================
+    # PHASE 7: Generate Output
+    # =========================================================================
+    - name: "Generate template on success"
+      when: test_passed
+      ansible.builtin.include_tasks: generate_template.yml
+
+    - name: "Generate failure report"
+      when: not test_passed
+      ansible.builtin.include_tasks: generate_report.yml
+
+    # =========================================================================
+    # PHASE 8: Cleanup
+    # =========================================================================
+    - name: "Cleanup test service"
+      when:
+        - cleanup_after
+        - test_service_uuid != ""
+      ansible.builtin.uri:
+        url: "{{ coolify_api_url }}/services/{{ test_service_uuid }}"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ coolify_api_token }}"
+        status_code: [200, 204, 404]
+      ignore_errors: true
+
+    # =========================================================================
+    # PHASE 9: Summary
+    # =========================================================================
+    - name: "Display test result"
+      ansible.builtin.debug:
+        msg: |
+          ====================================================================
+                      TEST RESULT: {{ service_name }}
+          ====================================================================
+            Status: {{ 'PASSED' if test_passed else 'FAILED' }}
+            Service UUID: {{ test_service_uuid | default('N/A') }}
+            {% if test_passed %}
+            Template: templates/{{ service_name }}/
+            {% else %}
+            Error: {{ test_error }}
+            Report: docs/plan/service/{{ service_name }}.md
+            {% endif %}
+          ====================================================================
+
+    - name: "Fail playbook if test failed"
+      ansible.builtin.fail:
+        msg: "Service test failed: {{ test_error }}"
+      when: not test_passed

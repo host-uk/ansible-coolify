@@ -1,0 +1,106 @@
+---
+# Create MariaDB database and user for a one-click app
+#
+# Required variables:
+#   oneclick_app_name: App name (used for database name)
+#   oneclick_db_name: Database name
+#   oneclick_db_user: Database user
+#   oneclick_db_password: Database password
+#   shared_mariadb_hostname: MariaDB host
+#   shared_mariadb_root_password: Root password
+
+- name: Validate MariaDB credentials available
+  ansible.builtin.assert:
+    that:
+      - shared_mariadb_root_password | length > 0
+    fail_msg: |
+      MariaDB root password not found.
+      Ensure the Galera cluster is deployed and state/galera/root_password.txt exists.
+    success_msg: "MariaDB credentials available"
+
+- name: Find Galera container
+  ansible.builtin.command:
+    cmd: docker ps --format "{{ '{{' }}.Names{{ '}}' }}" --filter "name=galera"
+  register: galera_container
+  changed_when: false
+  ignore_errors: true
+
+- name: Set MariaDB container name
+  ansible.builtin.set_fact:
+    mariadb_container: "{{ galera_container.stdout_lines | first | default('') }}"
+
+- name: Create database for app
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ mariadb_container }}
+      mariadb -u root -p{{ shared_mariadb_root_password }}
+      -e "CREATE DATABASE IF NOT EXISTS {{ oneclick_db_name }};"
+  register: create_db
+  changed_when: true
+  failed_when: false
+  when: mariadb_container | length > 0
+  no_log: true
+
+- name: Create user for app
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ mariadb_container }}
+      mariadb -u root -p{{ shared_mariadb_root_password }}
+      -e "CREATE USER IF NOT EXISTS '{{ oneclick_db_user }}'@'%' IDENTIFIED BY '{{ oneclick_db_password }}';"
+  register: create_user
+  changed_when: true
+  failed_when: false
+  when: mariadb_container | length > 0
+  no_log: true
+
+- name: Grant privileges to user
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ mariadb_container }}
+      mariadb -u root -p{{ shared_mariadb_root_password }}
+      -e "GRANT ALL PRIVILEGES ON {{ oneclick_db_name }}.* TO '{{ oneclick_db_user }}'@'%';"
+  changed_when: true
+  when: mariadb_container | length > 0
+  no_log: true
+
+- name: Flush privileges
+  ansible.builtin.command:
+    cmd: >
+      docker exec {{ mariadb_container }}
+      mariadb -u root -p{{ shared_mariadb_root_password }}
+      -e "FLUSH PRIVILEGES;"
+  changed_when: true
+  when: mariadb_container | length > 0
+  no_log: true
+
+- name: Build MariaDB connection URL
+  ansible.builtin.set_fact:
+    oneclick_mariadb_url: "mysql://{{ oneclick_db_user }}:{{ oneclick_db_password }}@{{ shared_mariadb_hostname }}:{{ shared_mariadb_port }}/{{ oneclick_db_name }}"
+
+- name: Build MariaDB environment variables
+  ansible.builtin.set_fact:
+    oneclick_mariadb_env_vars:
+      DATABASE_HOST: "{{ shared_mariadb_hostname }}"
+      DATABASE_PORT: "{{ shared_mariadb_port }}"
+      DATABASE_NAME: "{{ oneclick_db_name }}"
+      DATABASE_USER: "{{ oneclick_db_user }}"
+      DATABASE_PASSWORD: "{{ oneclick_db_password }}"
+      DATABASE_URL: "{{ oneclick_mariadb_url }}"
+      MYSQL_HOST: "{{ shared_mariadb_hostname }}"
+      MYSQL_PORT: "{{ shared_mariadb_port }}"
+      MYSQL_DATABASE: "{{ oneclick_db_name }}"
+      MYSQL_USER: "{{ oneclick_db_user }}"
+      MYSQL_PASSWORD: "{{ oneclick_db_password }}"
+      MARIADB_HOST: "{{ shared_mariadb_hostname }}"
+      MARIADB_DATABASE: "{{ oneclick_db_name }}"
+      MARIADB_USER: "{{ oneclick_db_user }}"
+      MARIADB_PASSWORD: "{{ oneclick_db_password }}"
+
+- name: Display MariaDB configuration
+  ansible.builtin.debug:
+    msg: |
+      MariaDB Configuration for {{ oneclick_app_name }}:
+        Host: {{ shared_mariadb_hostname }}
+        Port: {{ shared_mariadb_port }}
+        Database: {{ oneclick_db_name }}
+        User: {{ oneclick_db_user }}

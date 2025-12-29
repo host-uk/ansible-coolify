@@ -1,0 +1,34 @@
+# Service definition for: emby
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=emby -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: emby
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          emby:
+            image: 'lscr.io/linuxserver/emby:latest'
+            environment:
+              - SERVICE_URL_EMBY_8096
+              - PUID=1000
+              - PGID=1000
+              - TZ=Europe/Madrid
+            volumes:
+              - 'emby-config:/config'
+              - 'emby-tvshows:/tvshows'
+              - 'emby-movies:/movies'
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1:8096'
+              interval: 2s
+              timeout: 10s
+              retries: 15
+

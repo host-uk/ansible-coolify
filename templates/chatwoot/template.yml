@@ -1,0 +1,9 @@
+# Template: chatwoot
+# Auto-generated from service test
+# Date: 2025-12-29T08:03:44+00:00
+
+name: chatwoot
+service_type: chatwoot
+source: automated-test
+tested: true
+test_date: 2025-12-29T08:03:44+00:00

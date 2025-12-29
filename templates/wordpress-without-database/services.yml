@@ -1,0 +1,29 @@
+# Service definition for: wordpress-without-database
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=wordpress-without-database -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: wordpress-without-database
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          wordpress:
+            image: 'wordpress:latest'
+            volumes:
+              - 'wordpress-files:/var/www/html'
+            environment:
+              - SERVICE_URL_WORDPRESS
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://127.0.0.1'
+              interval: 2s
+              timeout: 10s
+              retries: 10
+

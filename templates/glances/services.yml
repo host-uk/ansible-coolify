@@ -1,0 +1,34 @@
+# Service definition for: glances
+# Auto-generated from successful service test
+#
+# Apply with:
+#   ansible-playbook playbooks/coolify/template/apply.yml \
+#     -e template_name=glances -e project=xxx -e env_name=yyy
+
+services:
+  - service_type: glances
+    description: ""
+    connect_to_docker_network: false
+    docker_compose_raw: |
+        services:
+          glances:
+            image: 'nicolargo/glances:latest'
+            restart: unless-stopped
+            environment:
+              - GLANCES_OPT=-w
+              - SERVICE_URL_GLANCES_61208
+            volumes:
+              - '/var/run/docker.sock:/var/run/docker.sock:ro'
+              - '/run/user/1000/podman/podman.sock:/run/user/1000/podman/podman.sock:ro'
+            pid: host
+            privileged: true
+            healthcheck:
+              test:
+                - CMD
+                - curl
+                - '-f'
+                - 'http://localhost:61208'
+              interval: 2s
+              timeout: 10s
+              retries: 30
+
